@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { assertReceiptCanStart, assertShipmentCanClose, assertShipmentCanReopen, formatUtcDateTime, normalizeReference, ShipmentDomainError } from "../app/utils/shipment-domain.js";
 
-const migrationPath = new URL("../prisma/migrations/20261023090000_add_shipments_receipts/migration.sql", import.meta.url);
-const receivingImportMigrationPath = new URL("../prisma/migrations/20261023130000_receiving_csv_imports/migration.sql", import.meta.url);
+const migrationPath = new URL("../prisma/migrations-sqlite-backup/20261023090000_add_shipments_receipts/migration.sql", import.meta.url);
+const receivingImportMigrationPath = new URL("../prisma/migrations-sqlite-backup/20261023130000_receiving_csv_imports/migration.sql", import.meta.url);
 
 test("shipment invariants normalize duplicates and guard closure/reopen transitions", () => {
   assert.equal(normalizeReference("  ab-01\t "), "AB-01");

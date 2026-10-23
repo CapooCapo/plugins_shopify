@@ -11,7 +11,7 @@ const { outputText } = ts.transpileModule(source, {
 });
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`;
 const { actorFromShopifySession, activityCreateData } = await import(moduleUrl);
-const migration = await readFile(new URL("../prisma/migrations/20261023210000_activity_history/migration.sql", import.meta.url), "utf8");
+const migration = await readFile(new URL("../prisma/migrations-sqlite-backup/20261023210000_activity_history/migration.sql", import.meta.url), "utf8");
 
 test("actor identity is attributed only from an online Shopify user session", () => {
   assert.deepEqual(actorFromShopifySession({ isOnline: true, userId: 998877n }), {

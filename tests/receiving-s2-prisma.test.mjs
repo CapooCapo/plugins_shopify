@@ -5,11 +5,11 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "../node_modules/.prisma/stockhub-test-client/index.js";
 import { confirmDuplicateSkuMerge, confirmExpectedGoods, confirmProductProposalGroup, createReceivingImport } from "../app/utils/receiving-import.server.ts";
 
 const repo = resolve(new URL("..", import.meta.url).pathname);
-const schemaFile = join(repo, "prisma/schema.prisma");
+const schemaFile = join(repo, "prisma/.schema.test.prisma");
 
 async function withTempPrisma(fn) {
   const dir = await mkdtemp(join(tmpdir(), "stockhub-s2-prisma-"));

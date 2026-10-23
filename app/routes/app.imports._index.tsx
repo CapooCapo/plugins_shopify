@@ -335,10 +335,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const error = locationContext.status === "error" && locationContext.graphqlError
         ? "Shopify GraphQL rejected the location read. Confirm read_locations access and retry verification."
         : locationContext.status === "error" && locationContext.httpStatus === 401
-        ? "Shopify authentication was rejected (401) while verifying the authorized location. Refresh the embedded app and retry."
-        : locationContext.status === "error" && locationContext.httpStatus === 403
-          ? "Shopify denied location access (403). Confirm the app's read_locations permission and reauthorize before retrying."
-          : locationContext.message;
+          ? "Shopify authentication was rejected (401) while verifying the authorized location. Refresh the embedded app and retry."
+          : locationContext.status === "error" && locationContext.httpStatus === 403
+            ? "Shopify denied location access (403). Confirm the app's read_locations permission and reauthorize before retrying."
+            : locationContext.message;
       return { error } satisfies ActionData;
     }
     if (!sameScopeGrant(grantedScopes, locationContext.scopes)) {
@@ -787,10 +787,10 @@ export default function Imports() {
               <input type="hidden" name="submissionId" value={data.submissionId} />
               <s-stack direction="block" gap="base">
                 <div className="stockhub-destination-badge">
-              <s-text type="strong">Import destination</s-text>
-              <span className="stockhub-current-shop-dot" />
-              <span>Store: {data.shop}</span>
-              {data.shopDomain ? <span className="stockhub-shop-domain">({data.shopDomain})</span> : null}
+                  <s-text type="strong">Import destination</s-text>
+                  <span className="stockhub-current-shop-dot" />
+                  <span>Store: {data.shop}</span>
+                  {data.shopDomain ? <span className="stockhub-shop-domain">({data.shopDomain})</span> : null}
                 </div>
                 <div className="stockhub-field-group">
                   <label htmlFor="location-id" className="stockhub-field-label"><strong>Shopify location</strong></label>
@@ -841,9 +841,9 @@ export default function Imports() {
                       <div className="stockhub-dropzone-content">
                         <div className="stockhub-dropzone-icon" aria-hidden="true">
                           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="17 8 12 3 7 8"/>
-                            <line x1="12" y1="3" x2="12" y2="15"/>
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="17 8 12 3 7 8" />
+                            <line x1="12" y1="3" x2="12" y2="15" />
                           </svg>
                         </div>
                         <div className="stockhub-dropzone-text">
@@ -855,10 +855,10 @@ export default function Imports() {
                       <div className="stockhub-dropzone-file-card">
                         <div className="stockhub-file-card-icon" aria-hidden="true">
                           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                            <polyline points="14 2 14 8 20 8"/>
-                            <line x1="16" y1="13" x2="8" y2="13"/>
-                            <line x1="16" y1="17" x2="8" y2="17"/>
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="16" y1="13" x2="8" y2="13" />
+                            <line x1="16" y1="17" x2="8" y2="17" />
                           </svg>
                         </div>
                         <div className="stockhub-file-card-info">
@@ -897,17 +897,11 @@ export default function Imports() {
           <aside className="stockhub-import-side-col" aria-label="CSV import guidance">
             <div className="stockhub-guidance-card">
               <s-text type="strong">Before you upload</s-text>
+              <s-paragraph>Required columns: <code>sku</code>, <code>quantity</code>. New products also need <code>title</code> and <code>price</code>. Optional columns: <code>description</code>, <code>image_url</code>.</s-paragraph>
               <s-paragraph>Maximum {MAX_CSV_BYTES.toLocaleString()} bytes and {MAX_CSV_ROWS} data rows. A maximum of {data.maxMergeLines} lines can be merged at once.</s-paragraph>
               <div className="stockhub-guidance-note">
                 <strong>Validation safety:</strong> Validating does not modify products or inventory in Shopify. A receipt is generated for your review first.
               </div>
-              <details><summary>Optional columns and advanced authorization details</summary>
-                <s-paragraph>Optional columns: <code>description</code>, <code>image_url</code>. Prices use store currency; image URLs are display-only.</s-paragraph>
-                <s-paragraph>
-                  Installed scopes from Shopify: <code>{data.authorizationStatus === "verified" ? (data.installedScopes.length ? data.installedScopes.join(", ") : "none granted") : "not verified"}</code>
-                  {data.shopDomain ? <> · Shopify Admin API store: <strong>{data.shopDomain}</strong></> : null}
-                </s-paragraph>
-              </details>
             </div>
           </aside>
         </div>

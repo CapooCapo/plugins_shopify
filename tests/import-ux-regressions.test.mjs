@@ -196,18 +196,10 @@ test("History filters retain GET fields and stack at the narrow embedded-app vie
     "History filter controls stack into one column at mobile widths");
 });
 
-test("raw installed-scope diagnostics are inside a disclosure", async () => {
+test("raw installed-scope diagnostics are not exposed in the upload UI", async () => {
   const imports = await source("app.imports._index.tsx");
-  const diagnosticIndex = imports.indexOf("Installed scopes from Shopify:");
-  const detailsStart = imports.lastIndexOf("<details", diagnosticIndex);
-  const summaryStart = imports.indexOf("<summary", detailsStart);
-  const detailsEnd = imports.indexOf("</details>", diagnosticIndex);
-
-  assert.ok(
-    diagnosticIndex >= 0 && detailsStart >= 0 && summaryStart > detailsStart &&
-      summaryStart < diagnosticIndex && detailsEnd > diagnosticIndex,
-    "raw Shopify scope diagnostics should only render inside a user-expandable details/summary disclosure",
-  );
+  assert.doesNotMatch(imports, /Installed scopes from Shopify:/,
+    "raw Shopify scope diagnostics should stay out of the upload UI");
 });
 
 test("New Import presents a safe upload-to-receipt workflow without adding merge behavior", async () => {

@@ -61,7 +61,7 @@ test("Activity logging records preview, merge attempt/result, per-line result an
     source("app.imports._index.tsx"),
     readFile(new URL("../app/utils/import-receipts.server.ts", import.meta.url), "utf8"),
     readFile(new URL("../prisma/schema.prisma", import.meta.url), "utf8"),
-    readFile(new URL("../prisma/migrations/20261023210000_activity_history/migration.sql", import.meta.url), "utf8"),
+    readFile(new URL("../prisma/migrations-sqlite-backup/20261023210000_activity_history/migration.sql", import.meta.url), "utf8"),
   ]);
   assert.match(receiptStore, /eventType:\s*"IMPORT_PREVIEWED"/);
   assert.match(receiptStore, /transaction\.activityLog\.create/,

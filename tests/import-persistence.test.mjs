@@ -5,11 +5,11 @@ import test from "node:test";
 
 const schemaUrl = new URL("../prisma/schema.prisma", import.meta.url);
 const initialMigrationUrl = new URL(
-  "../prisma/migrations/20261022050000_create_import_batches/migration.sql",
+  "../prisma/migrations-sqlite-backup/20261022050000_create_import_batches/migration.sql",
   import.meta.url,
 );
 const receiptMigrationUrl = new URL(
-  "../prisma/migrations/20261022100000_auto_generated_import_receipts/migration.sql",
+  "../prisma/migrations-sqlite-backup/20261022100000_auto_generated_import_receipts/migration.sql",
   import.meta.url,
 );
 const importsRouteUrl = new URL("../app/routes/app.imports._index.tsx", import.meta.url);

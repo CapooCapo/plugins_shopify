@@ -5,17 +5,17 @@ import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "../node_modules/.prisma/stockhub-test-client/index.js";
 import { createReceivingImport } from "../app/utils/receiving-import.server.ts";
 import { confirmReceiptInspection, prepareReceiptInspection, saveReceiptInspectionLine } from "../app/utils/receiving-inspection.server.ts";
 
 const migrationPaths = [
-  "../prisma/migrations/20240530213853_create_session_table/migration.sql",
-  "../prisma/migrations/20261022050000_create_import_batches/migration.sql",
-  "../prisma/migrations/20261022100000_auto_generated_import_receipts/migration.sql",
-  "../prisma/migrations/20261023090000_add_shipments_receipts/migration.sql",
-  "../prisma/migrations/20261023130000_receiving_csv_imports/migration.sql",
-  "../prisma/migrations/20261023180000_receipt_inspection_foundation/migration.sql",
+  "../prisma/migrations-sqlite-backup/20240530213853_create_session_table/migration.sql",
+  "../prisma/migrations-sqlite-backup/20261022050000_create_import_batches/migration.sql",
+  "../prisma/migrations-sqlite-backup/20261022100000_auto_generated_import_receipts/migration.sql",
+  "../prisma/migrations-sqlite-backup/20261023090000_add_shipments_receipts/migration.sql",
+  "../prisma/migrations-sqlite-backup/20261023130000_receiving_csv_imports/migration.sql",
+  "../prisma/migrations-sqlite-backup/20261023180000_receipt_inspection_foundation/migration.sql",
 ].map((path) => new URL(path, import.meta.url));
 
 async function isolatedPrisma(t) {
