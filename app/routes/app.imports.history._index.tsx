@@ -1,5 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Form, useLoaderData } from "react-router";
+import { Form, Link, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { RoutePending } from "../components/RoutePending";
 import { authenticate } from "../shopify.server";
@@ -221,9 +221,9 @@ export default function ImportHistory() {
             {data.history.map((batch) => (
               <s-table-row key={batch.id}>
                 <s-table-cell>
-                  <a href={historyDetailHref(batch.id, data.historySearch, data.historyStatus, data.pageCursor, data.pageDirection)}>
+                  <Link to={historyDetailHref(batch.id, data.historySearch, data.historyStatus, data.pageCursor, data.pageDirection)}>
                     {receiptCodeLabel(batch.receiptCode)}
-                  </a>
+                  </Link>
                 </s-table-cell>
                 <s-table-cell>{batch.locationName}</s-table-cell>
                 <s-table-cell>{formatStockhubDateTime(batch.createdAt)}</s-table-cell>
