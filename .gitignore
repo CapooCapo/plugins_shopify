@@ -15,6 +15,18 @@ database.sqlite
 
 .env
 .env.*
+!.env.example
+!.env.*.example
+
+# Local runtime and test artifacts
+.ai/
+*.log
+*.tsbuildinfo
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+tests/hydration-harness/screenshots/
 
 
 
@@ -32,3 +44,4 @@ database.sqlite
 # Vendor and preview fixtures
 tests/visual-harness/polaris.js
 docs/ui-preview/
+.ai/
