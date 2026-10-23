@@ -99,6 +99,7 @@ test("conflicting current Shopify scope responses disable the loader UI and reje
     source.indexOf("const previewDisabled ="),
     source.indexOf(";", source.indexOf("const previewDisabled =")),
   );
+  const mergeDisabled = detail.match(/const mergeDisabled\s*=\s*([^;]+);/)?.[1] ?? "";
   assert.match(
     loader,
     /authorizationStatus\s*===\s*"verified"[\s\S]*?!sameScopeGrant\(grantedScopes,\s*locationScopes\)[\s\S]*?authorizationStatus\s*=\s*"mismatch"[\s\S]*?locationStatus\s*=\s*"error"/,
@@ -110,8 +111,13 @@ test("conflicting current Shopify scope responses disable the loader UI and reje
     "the loader must not expose locations after current Shopify grant sources disagree",
   );
   assert.match(previewDisabled, /data\.authorizationStatus\s*!==\s*"verified"/);
-  assert.match(detail, /const mergeDisabled\s*=\s*!scopesVerified\s*\|\|\s*missingWriteScopes\.length\s*>\s*0\s*\|\|\s*missingReadScopes\.length\s*>\s*0/,
-    "the selected receipt merge/resume action remains disabled unless scopes were verified and required grants exist");
+  assert.match(mergeDisabled, /!scopesVerified[\s\S]*missingReadScopes\.length\s*>\s*0[\s\S]*missingWriteScopes\.includes\("write_inventory"\)[\s\S]*productWriteRequired\s*&&\s*missingWriteScopes\.includes\("write_products"\)/,
+    "the receipt action requires verified read scopes and inventory write, and requires product write only when eligible product creation needs it");
+  assert.match(
+    action,
+    /const needsProductWrite\s*=\s*batch\.lines\.some\([\s\S]*?line\.operationType\s*===\s*"CREATE_DRAFT"[\s\S]*?!\["VARIANT_PRICE_CONFIGURED",\s*"INVENTORY_ACTIVATING",\s*"INVENTORY_ACTIVE"\]\.includes\(line\.stage\)[\s\S]*?if\s*\(needsProductWrite\)\s*neededScopes\.add\("write_products"\)/,
+    "the action's write_products requirement must remain conditional on an eligible product-creation stage",
+  );
   assert.match(
     action,
     /if\s*\(!sameScopeGrant\(grantedScopes,\s*locationContext\.scopes\)\)\s*\{\s*return\s*\{\s*authorizationError:\s*SCOPE_VERIFICATION_MISMATCH\s*\}/,

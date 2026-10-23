@@ -395,7 +395,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       (line) =>
         line.operationType === "CREATE_DRAFT" &&
         !["SUCCEEDED", "BLOCKED"].includes(line.status) &&
-        !["INVENTORY_ITEM_CONFIGURING", "VARIANT_PRICE_CONFIGURED", "INVENTORY_ACTIVATING", "INVENTORY_ACTIVE"].includes(line.stage),
+        !["VARIANT_PRICE_CONFIGURED", "INVENTORY_ACTIVATING", "INVENTORY_ACTIVE"].includes(line.stage),
     );
     if (needsProductWrite) neededScopes.add("write_products");
     const missing = missingScopesForGrant(grantedScopes, [...neededScopes]);

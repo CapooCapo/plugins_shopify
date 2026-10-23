@@ -174,3 +174,35 @@ test("Preview, History filters, Verify, Merge, and Resume submit to the route th
   assert.match(newImport, /return redirect\(`\/app\/imports\/history\/\$\{encodeURIComponent\(batchId\)\}`\)/,
     "successful merge navigates to the correct selected receipt route");
 });
+
+test("Merge UI scope and blocked-row gates match the action's resumable workflow", async (t) => {
+  const [detail, newImport] = await Promise.all([
+    source(historyDetailRoute),
+    source(newImportRoute),
+  ]);
+  const mergeDisabled = detail.match(/const mergeDisabled\s*=\s*([^;]+);/)?.[1] ?? "";
+  const mergeAction = newImport.slice(
+    newImport.indexOf('if (intent === "merge" || intent === "resume")'),
+    newImport.indexOf("const attemptId", newImport.indexOf('if (intent === "merge" || intent === "resume")')),
+  );
+
+  await t.test("inventory-only batches do not require write_products", () => {
+    assert.match(mergeAction, /const needsProductWrite\s*=\s*batch\.lines\.some\([\s\S]*?line\.operationType\s*===\s*"CREATE_DRAFT"[\s\S]*?\);[\s\S]*?if\s*\(needsProductWrite\)\s*neededScopes\.add\("write_products"\)/,
+      "the action requires write_products only when eligible CREATE_DRAFT lines need it");
+    assert.match(mergeDisabled, /write_products[\s\S]*(?:needsProductWrite|productWriteRequired)|(?:needsProductWrite|productWriteRequired)[\s\S]*write_products/,
+      "the UI must not disable an inventory-only batch solely because write_products is absent");
+  });
+
+  await t.test("resuming INVENTORY_ITEM_CONFIGURING remains write_products-gated", () => {
+    const exemptStages = mergeAction.match(/!\[([^\]]*)\]\.includes\(line\.stage\)/)?.[1] ?? "";
+    assert.doesNotMatch(exemptStages, /INVENTORY_ITEM_CONFIGURING/,
+      "this resume stage continues into productVariantsBulkUpdate and must not be exempt from write_products");
+  });
+
+  await t.test("blocked rows prevent initial Merge but do not suppress eligible Resume lines", () => {
+    assert.match(mergeAction, /batch\.status\s*===\s*"PREVIEWED"[\s\S]*?batch\.lines\.some\(\(line\)\s*=>\s*line\.status\s*===\s*"BLOCKED"\s*\|\|\s*line\.operationType\s*===\s*"BLOCKED"\)/,
+      "the server must continue rejecting a PREVIEWED batch containing blocked rows");
+    assert.match(mergeDisabled, /batch\.status\s*===\s*"PREVIEWED"[\s\S]*?blocked\s*>\s*0|blocked\s*>\s*0[\s\S]*?batch\.status\s*===\s*"PREVIEWED"/,
+      "the UI should disable Merge for blocked previews but allow Resume to process other eligible lines");
+  });
+});

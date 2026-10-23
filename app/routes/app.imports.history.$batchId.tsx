@@ -165,8 +165,29 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
   }, [batch.lines, lineSearch, lineStatusFilter]);
   const linePageCount = Math.max(1, Math.ceil(filteredLines.length / linePageSize));
   const visibleLines = filteredLines.slice(linePage * linePageSize, (linePage + 1) * linePageSize);
-  const hasMergeable = batch.lines.some((line) => !["SUCCEEDED", "BLOCKED"].includes(line.status));
-  const mergeDisabled = !scopesVerified || missingWriteScopes.length > 0 || missingReadScopes.length > 0 || blocked > 0 || !hasMergeable;
+  const productWriteRequired = batch.lines.some((line) =>
+    line.operationType === "CREATE_DRAFT" &&
+    !["SUCCEEDED", "BLOCKED"].includes(line.status) &&
+    !["VARIANT_PRICE_CONFIGURED", "INVENTORY_ACTIVATING", "INVENTORY_ACTIVE"].includes(line.stage),
+  );
+  const hasMergeable = batch.lines.some((line) =>
+    !["SUCCEEDED", "BLOCKED"].includes(line.status) && line.operationType !== "BLOCKED",
+  );
+  const missingRequiredWriteScopes = [
+    ...(missingWriteScopes.includes("write_inventory") ? ["write_inventory"] : []),
+    ...(productWriteRequired && missingWriteScopes.includes("write_products") ? ["write_products"] : []),
+  ];
+  const blockedPreview = batch.status === "PREVIEWED" && blocked > 0;
+  const mergeDisabled = !scopesVerified || missingReadScopes.length > 0 || missingWriteScopes.includes("write_inventory") || (productWriteRequired && missingWriteScopes.includes("write_products")) || (batch.status === "PREVIEWED" && blocked > 0) || !hasMergeable;
+  const mergeDisabledReason = !scopesVerified
+    ? "Shopify permissions could not be verified. Refresh this page and reauthorize StockHub if the issue continues."
+    : missingReadScopes.length > 0 || missingRequiredWriteScopes.length > 0
+      ? `Missing Shopify permissions: ${[...missingReadScopes, ...missingRequiredWriteScopes].join(", ")}. Reauthorize StockHub before merging or resuming.`
+      : blockedPreview
+        ? "This preview contains blocked rows. Correct the CSV and create a new preview before merging."
+        : !hasMergeable
+          ? "There are no eligible lines left to merge or resume."
+          : null;
 
   return (
     <div className="stockhub-receipt-card"><s-section>
@@ -243,6 +264,7 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
         <Form method="post"><input type="hidden" name="intent" value="verifyShopifyState"/><input type="hidden" name="batchId" value={batch.id}/><s-button type="submit">Verify Shopify State</s-button></Form>
         <Form method="post" onSubmit={(event) => { if (!window.confirm(`Confirm ${batch.status === "PREVIEWED" ? "merge" : "resume"} for receipt ${batch.receiptCode} in ${batch.shop}?`)) event.preventDefault(); }}><input type="hidden" name="intent" value={batch.status === "PREVIEWED" ? "merge" : "resume"}/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="confirmed" value="yes"/><s-button type="submit" disabled={mergeDisabled}>{batch.status === "PREVIEWED" ? "Merge" : "Resume"} eligible lines</s-button></Form>
       </s-button-group>
+      {mergeDisabledReason ? <s-banner tone="warning">{mergeDisabledReason}</s-banner> : null}
       <s-heading>Line items</s-heading>
       {batch.lines.length ? <>
         <s-grid gridTemplateColumns="repeat(auto-fit, minmax(180px, 1fr))" gap="base">
