@@ -1,0 +1,236 @@
+[
+  {
+    "width": 1280,
+    "name": "initial",
+    "state": {
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "documentChildren": [
+        "HEAD",
+        "BODY"
+      ],
+      "headChildren": [
+        {
+          "tag": "META",
+          "rel": null,
+          "href": null
+        },
+        {
+          "tag": "META",
+          "rel": null,
+          "href": null
+        },
+        {
+          "tag": "LINK",
+          "rel": "stylesheet",
+          "href": "/assets/root-bemYANqs.css"
+        },
+        {
+          "tag": "LINK",
+          "rel": "stylesheet",
+          "href": "/assets/route-Xpdx9QZl.css"
+        }
+      ],
+      "stockhubStylesheet": true,
+      "appBodyPresent": true
+    },
+    "consoleErrors": []
+  },
+  {
+    "width": 1280,
+    "name": "3s",
+    "state": {
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "documentChildren": [
+        "HEAD",
+        "BODY"
+      ],
+      "headChildren": [
+        {
+          "tag": "META",
+          "rel": null,
+          "href": null
+        },
+        {
+          "tag": "META",
+          "rel": null,
+          "href": null
+        },
+        {
+          "tag": "LINK",
+          "rel": "stylesheet",
+          "href": "/assets/root-bemYANqs.css"
+        },
+        {
+          "tag": "LINK",
+          "rel": "stylesheet",
+          "href": "/assets/route-Xpdx9QZl.css"
+        }
+      ],
+      "stockhubStylesheet": true,
+      "appBodyPresent": true
+    },
+    "consoleErrors": []
+  },
+  {
+    "width": 1280,
+    "name": "10s",
+    "state": {
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "documentChildren": [
+        "HEAD",
+        "BODY"
+      ],
+      "headChildren": [
+        {
+          "tag": "META",
+          "rel": null,
+          "href": null
+        },
+        {
+          "tag": "META",
+          "rel": null,
+          "href": null
+        },
+        {
+          "tag": "LINK",
+          "rel": "stylesheet",
+          "href": "/assets/root-bemYANqs.css"
+        },
+        {
+          "tag": "LINK",
+          "rel": "stylesheet",
+          "href": "/assets/route-Xpdx9QZl.css"
+        }
+      ],
+      "stockhubStylesheet": true,
+      "appBodyPresent": true
+    },
+    "consoleErrors": []
+  },
+  {
+    "width": 390,
+    "name": "initial",
+    "state": {
+      "viewport": {
+        "width": 390,
+        "height": 900
+      },
+      "documentChildren": [
+        "HEAD",
+        "BODY"
+      ],
+      "headChildren": [
+        {
+          "tag": "META",
+          "rel": null,
+          "href": null
+        },
+        {
+          "tag": "META",
+          "rel": null,
+          "href": null
+        },
+        {
+          "tag": "LINK",
+          "rel": "stylesheet",
+          "href": "/assets/root-bemYANqs.css"
+        },
+        {
+          "tag": "LINK",
+          "rel": "stylesheet",
+          "href": "/assets/route-Xpdx9QZl.css"
+        }
+      ],
+      "stockhubStylesheet": true,
+      "appBodyPresent": true
+    },
+    "consoleErrors": []
+  },
+  {
+    "width": 390,
+    "name": "3s",
+    "state": {
+      "viewport": {
+        "width": 390,
+        "height": 900
+      },
+      "documentChildren": [
+        "HEAD",
+        "BODY"
+      ],
+      "headChildren": [
+        {
+          "tag": "META",
+          "rel": null,
+          "href": null
+        },
+        {
+          "tag": "META",
+          "rel": null,
+          "href": null
+        },
+        {
+          "tag": "LINK",
+          "rel": "stylesheet",
+          "href": "/assets/root-bemYANqs.css"
+        },
+        {
+          "tag": "LINK",
+          "rel": "stylesheet",
+          "href": "/assets/route-Xpdx9QZl.css"
+        }
+      ],
+      "stockhubStylesheet": true,
+      "appBodyPresent": true
+    },
+    "consoleErrors": []
+  },
+  {
+    "width": 390,
+    "name": "10s",
+    "state": {
+      "viewport": {
+        "width": 390,
+        "height": 900
+      },
+      "documentChildren": [
+        "HEAD",
+        "BODY"
+      ],
+      "headChildren": [
+        {
+          "tag": "META",
+          "rel": null,
+          "href": null
+        },
+        {
+          "tag": "META",
+          "rel": null,
+          "href": null
+        },
+        {
+          "tag": "LINK",
+          "rel": "stylesheet",
+          "href": "/assets/root-bemYANqs.css"
+        },
+        {
+          "tag": "LINK",
+          "rel": "stylesheet",
+          "href": "/assets/route-Xpdx9QZl.css"
+        }
+      ],
+      "stockhubStylesheet": true,
+      "appBodyPresent": true
+    },
+    "consoleErrors": []
+  }
+]

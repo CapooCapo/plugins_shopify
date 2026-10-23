@@ -1,0 +1,336 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "sqlite"
+  url      = "file:dev.sqlite"
+}
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model ImportBatch {
+  id           String       @id
+  shop         String
+  submissionId String?
+  receiptCode  String
+  fileChecksum String
+  fileName     String
+  locationId   String
+  locationName String
+  currencyCode String
+  status       String       @default("PREVIEWED")
+  actor        String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  completedAt  DateTime?
+  lines        ImportLine[]
+  activityLogs ActivityLog[]
+
+  @@unique([shop, submissionId])
+  @@unique([shop, receiptCode])
+  @@unique([shop, id])
+  @@index([shop, createdAt])
+  @@index([status])
+}
+
+model ActivityLog {
+  id            String   @id
+  shop          String
+  eventType     String
+  outcome       String
+  occurredAt    DateTime @default(now())
+  actorType     String
+  actorId       String?
+  importBatchId String?
+  importLineId  String?
+  receiptCode   String?
+  attemptId     String?
+  summary       String
+  metadataJson  String?
+  sourceKey     String
+  createdAt     DateTime @default(now())
+  batch         ImportBatch? @relation(fields: [shop, importBatchId], references: [shop, id], onDelete: Cascade)
+
+  @@unique([shop, sourceKey])
+  @@index([shop, occurredAt, id])
+  @@index([shop, eventType, occurredAt, id])
+  @@index([shop, outcome, occurredAt, id])
+  @@index([shop, importBatchId, occurredAt])
+}
+
+model ImportReceiptCounter {
+  shop         String
+  dateKey      String
+  lastSequence Int
+
+  @@id([shop, dateKey])
+}
+
+model ImportLine {
+  id                  String      @id
+  batchId             String
+  rowNumber           Int
+  sku                 String
+  title               String?
+  description         String?
+  price               String?
+  imageUrl            String?
+  quantity            Int?
+  operationType       String
+  status              String      @default("PREVIEWED")
+  stage               String      @default("PREPARED")
+  operationId         String      @unique
+  idempotencyKey      String      @unique
+  productId           String?
+  variantId           String?
+  inventoryItemId     String?
+  expectedQuantity    Int?
+  matchedProductTitle String?
+  matchedVariantTitle String?
+  errorCode           String?
+  errorDetail         String?
+  shopifyProductUrl   String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  completedAt         DateTime?
+  batch               ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, rowNumber])
+  @@index([batchId, status])
+  @@index([sku])
+}
+
+model Shipment {
+  id                  String                   @id
+  shop                String
+  referenceType       String
+  reference           String
+  referenceNormalized String
+  issuer              String
+  issuerNormalized    String
+  notes               String?
+  status              String                   @default("OPEN")
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  closedAt            DateTime?
+  expectations        ShipmentExpectation[]
+  receipts            ReceivingReceipt[]
+  events              ShipmentEvent[]
+  importAttempts      ReceivingImportAttempt[]
+
+  @@unique([shop, referenceType, issuerNormalized, referenceNormalized])
+  @@unique([shop, id])
+  @@index([shop, status, createdAt])
+  @@index([shop, referenceNormalized])
+}
+
+model ShipmentExpectation {
+  id          String   @id
+  shipmentId  String
+  sku         String
+  expectedQty Int?
+  createdAt   DateTime @default(now())
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@unique([shipmentId, sku])
+  @@index([shipmentId])
+}
+
+model ReceivingReceipt {
+  id           String                   @id
+  shop         String
+  shipmentId   String
+  requestId    String
+  locationId   String
+  locationName String
+  status       String                   @default("DRAFT")
+  confirmedAt  DateTime?
+  confirmationId String?
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+  shipment     Shipment                 @relation(fields: [shop, shipmentId], references: [shop, id], onDelete: Restrict)
+  imports      ReceivingImportAttempt[]
+  inspectionLines ReceiptInspectionLine[]
+  exceptions   ReceiptInspectionException[]
+  inventoryOperations ReceiptInventoryOperation[]
+
+  @@unique([shop, requestId])
+  @@unique([shop, id])
+  @@index([shop, shipmentId, createdAt])
+  @@index([shop, locationId])
+}
+
+model ReceivingImportAttempt {
+  id             String                         @id
+  shop           String
+  shipmentId     String
+  receiptId      String?
+  mode           String
+  fileName       String
+  fileChecksum   String
+  dedupeKey      String
+  mappingJson    String
+  status         String                         @default("READY")
+  createdAt      DateTime                       @default(now())
+  shipment       Shipment                       @relation(fields: [shop, shipmentId], references: [shop, id], onDelete: Restrict)
+  receipt        ReceivingReceipt?              @relation(fields: [shop, receiptId], references: [shop, id], onDelete: Restrict)
+  rows           ReceivingImportRow[]
+  proposalGroups ReceivingImportProposalGroup[]
+
+  @@unique([shop, dedupeKey])
+  @@index([shop, shipmentId, createdAt])
+  @@index([shop, fileChecksum, mode])
+}
+
+model ReceivingImportRow {
+  id               String                        @id
+  attemptId        String
+  rowNumber        Int
+  rawValuesJson    String
+  sku              String?
+  quantity         Int?
+  productGroup     String?
+  validationJson   String
+  outcome          String                        @default("NEEDS_REVIEW")
+  decision         String?
+  decisionReason   String?
+  proposalJson     String?
+  proposalGroupId  String?
+  matchedProductId String?
+  matchedVariantId String?
+  createdAt        DateTime                      @default(now())
+  attempt          ReceivingImportAttempt        @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  proposalGroup    ReceivingImportProposalGroup? @relation(fields: [proposalGroupId], references: [id], onDelete: SetNull)
+  inspectionLine   ReceiptInspectionLine?
+  inspectionExceptions ReceiptInspectionException[]
+
+  @@unique([attemptId, rowNumber])
+  @@index([attemptId, outcome])
+  @@index([sku])
+}
+
+model ReceiptInspectionLine {
+  id               String                      @id
+  shop             String
+  receiptId        String
+  sourceRowId      String                      @unique
+  sku              String?
+  productName      String?
+  receivedQty      Int
+  acceptedQty      Int                         @default(0)
+  damagedQty       Int                         @default(0)
+  onHoldQty        Int                         @default(0)
+  matchOutcome     String
+  matchedProductId String?
+  matchedVariantId String?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+  receipt          ReceivingReceipt            @relation(fields: [shop, receiptId], references: [shop, id], onDelete: Restrict)
+  sourceRow        ReceivingImportRow          @relation(fields: [sourceRowId], references: [id], onDelete: Restrict)
+  exceptions       ReceiptInspectionException[]
+  inventoryOperation ReceiptInventoryOperation?
+
+  @@unique([shop, id])
+  @@index([shop, receiptId, createdAt])
+  @@index([receiptId, sku])
+}
+
+model ReceiptInspectionException {
+  id          String                @id
+  shop        String
+  receiptId   String
+  lineId      String?
+  sourceRowId String?
+  requestId   String?
+  type        String
+  quantity    Int?
+  suspectedSku String?
+  reason      String
+  disposition String?
+  status      String                @default("OPEN")
+  createdAt   DateTime              @default(now())
+  receipt     ReceivingReceipt     @relation(fields: [shop, receiptId], references: [shop, id], onDelete: Restrict)
+  line        ReceiptInspectionLine? @relation(fields: [shop, lineId], references: [shop, id], onDelete: Restrict)
+  sourceRow   ReceivingImportRow?   @relation(fields: [sourceRowId], references: [id], onDelete: Restrict)
+
+  @@unique([shop, requestId])
+  @@unique([receiptId, lineId, type])
+  @@unique([receiptId, sourceRowId, type])
+  @@index([shop, receiptId, status])
+  @@index([sourceRowId])
+}
+
+model ReceiptInventoryOperation {
+  id               String               @id
+  shop             String
+  receiptId        String
+  lineId           String
+  operationKey     String
+  locationId       String
+  targetVariantId  String
+  inventoryItemId  String?
+  acceptedDelta    Int
+  snapshotAvailable Int?
+  snapshotTakenAt  DateTime?
+  status           String               @default("PENDING")
+  createdAt        DateTime             @default(now())
+  receipt          ReceivingReceipt    @relation(fields: [shop, receiptId], references: [shop, id], onDelete: Restrict)
+  line             ReceiptInspectionLine @relation(fields: [shop, lineId], references: [shop, id], onDelete: Restrict)
+
+  @@unique([shop, operationKey])
+  @@unique([shop, lineId])
+  @@index([shop, receiptId, status])
+}
+
+model ReceivingImportProposalGroup {
+  id          String                 @id
+  attemptId   String
+  groupKey    String
+  productName String
+  status      String                 @default("DRAFT")
+  decision    String?
+  createdAt   DateTime               @default(now())
+  attempt     ReceivingImportAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  rows        ReceivingImportRow[]
+
+  @@unique([attemptId, groupKey])
+  @@index([attemptId, status])
+}
+
+model ShipmentEvent {
+  id         String   @id
+  shop       String
+  shipmentId String
+  type       String
+  reason     String?
+  metadata   String?
+  createdAt  DateTime @default(now())
+  shipment   Shipment @relation(fields: [shop, shipmentId], references: [shop, id], onDelete: Restrict)
+
+  @@index([shop, shipmentId, createdAt])
+}
