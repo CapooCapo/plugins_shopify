@@ -25,11 +25,12 @@ const imports = {
 import NewImport from "../../app/routes/app.imports._index";
 import { ImportDirtyContext } from "../../app/import-dirty-context";
 import { newImportFixture } from "./new-import-fixture";
+import { ReceiptActionsFixture, receiptActionsFixtureAction } from "./ReceiptActionsFixture";
 
 const selectedPage = new URLSearchParams(location.search).get("page") ?? "overview";
 const skuMode = new URLSearchParams(location.search).get("mode") === "sku";
 
-const initialPath = selectedPage === "products" ? "/app/products" : selectedPage === "new-import" ? "/app/imports" : "/app";
+const initialPath = selectedPage === "products" ? "/app/products" : selectedPage === "new-import" ? "/app/imports" : selectedPage === "receipt-actions" ? "/app/receipt-actions" : "/app";
 
 const router = createMemoryRouter([
   {
@@ -71,6 +72,11 @@ const router = createMemoryRouter([
       </div>
     </s-page>,
     loader: () => newImportFixture,
+  },
+  {
+    path: "/app/receipt-actions",
+    element: <s-page inlineSize="large"><ReceiptActionsFixture /></s-page>,
+    action: receiptActionsFixtureAction,
   },
 ], { initialEntries: [initialPath] });
 
@@ -135,6 +141,56 @@ function measure() {
       validateButton: !!document.querySelector('s-button[type="submit"]'),
       guidanceCard: box(".stockhub-guidance-card"),
     } : null,
+    receiptActions: selectedPage === "receipt-actions" ? (() => {
+      const host = document.querySelector<HTMLElement>(".stockhub-merge-action s-button");
+      const innerButton = host?.shadowRoot?.querySelector<HTMLButtonElement>("button");
+      const searchField = document.querySelector("s-text-field[label=\"Search line items\"]");
+      const searchInput = searchField?.shadowRoot?.querySelector<HTMLInputElement>("input");
+      const style = (element: Element | null) => {
+        if (!element) return null;
+        const computed = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return {
+          tag: element.tagName,
+          display: computed.display,
+          visibility: computed.visibility,
+          opacity: computed.opacity,
+          overflowX: computed.overflowX,
+          overflowY: computed.overflowY,
+          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom },
+          clientRectCount: element.getClientRects().length,
+        };
+      };
+      const ancestors: ReturnType<typeof style>[] = [];
+      for (let node = host?.parentElement; node && node !== document.documentElement; node = node.parentElement) {
+        ancestors.push(style(node));
+      }
+      return {
+        summary: (() => {
+          const wrap = document.querySelector<HTMLElement>(".stockhub-receipt-summary-wrap");
+          const table = document.querySelector<HTMLElement>(".stockhub-receipt-summary");
+          const rect = wrap?.getBoundingClientRect();
+          return {
+            width: rect?.width ?? 0,
+            scrollWidth: wrap?.scrollWidth ?? 0,
+            rowCount: table?.querySelectorAll("tbody tr").length ?? 0,
+            caption: table?.querySelector("caption")?.textContent?.trim() ?? "",
+            tones: [...(table?.querySelectorAll(".stockhub-receipt-summary-count") ?? [])]
+              .map((element) => [...element.classList].find((name) => name.startsWith("stockhub-receipt-summary-count--")) ?? ""),
+          };
+        })(),
+        customElementDefined: !!customElements.get("s-button"),
+        searchLabel: searchField?.getAttribute("label"),
+        searchFieldRect: searchInput ? (() => {
+          const rect = searchInput.getBoundingClientRect();
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, bottom: rect.bottom };
+        })() : null,
+        variant: host?.getAttribute("variant"),
+        host: style(host),
+        shadowButton: style(innerButton ?? null),
+        ancestors,
+      };
+    })() : null,
   };
   document.getElementById("visual-metrics")!.textContent = JSON.stringify(metrics);
   document.body.dataset.visualReady = "true";

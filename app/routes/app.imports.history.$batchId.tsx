@@ -209,13 +209,21 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
         </div>
         <progress aria-label={`${successful} of ${totalLines} import lines completed`} max={Math.max(totalLines, 1)} value={successful} />
       </div>
-      <s-grid gridTemplateColumns="repeat(auto-fit, minmax(180px, 1fr))" gap="base" accessibilityRole="region" accessibilityLabel="Import progress summary">
-        <s-text>Draft products created: {confirmedProductsCreated} confirmed</s-text>
-        <s-text>Unresolved Draft product creation: {uncertainProductCreations}</s-text>
-        <s-text>Inventory activated: {confirmedInventoryActivated} confirmed</s-text>
-        <s-text>Import lines completed: {successful}</s-text>
-        <s-text>Failed: {failed} · Blocked: {blocked} · Uncertain: {uncertain}</s-text>
-      </s-grid>
+      <div className="stockhub-receipt-summary-wrap" role="region" aria-label="Import progress summary">
+        <table className="stockhub-receipt-summary">
+          <caption>Import progress summary</caption>
+          <thead><tr><th scope="col">Metric</th><th scope="col">Count</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Draft products created</th><td><span className={`stockhub-receipt-summary-count ${confirmedProductsCreated > 0 ? "stockhub-receipt-summary-count--success" : "stockhub-receipt-summary-count--neutral"}`}>{confirmedProductsCreated} confirmed</span></td></tr>
+            <tr><th scope="row">Unresolved Draft product creation</th><td><span className={`stockhub-receipt-summary-count ${uncertainProductCreations > 0 ? "stockhub-receipt-summary-count--warning" : "stockhub-receipt-summary-count--neutral"}`}>{uncertainProductCreations}</span></td></tr>
+            <tr><th scope="row">Inventory activated</th><td><span className={`stockhub-receipt-summary-count ${confirmedInventoryActivated > 0 ? "stockhub-receipt-summary-count--success" : "stockhub-receipt-summary-count--neutral"}`}>{confirmedInventoryActivated} confirmed</span></td></tr>
+            <tr><th scope="row">Import lines completed</th><td><span className={`stockhub-receipt-summary-count ${successful > 0 ? "stockhub-receipt-summary-count--success" : "stockhub-receipt-summary-count--neutral"}`}>{successful}</span></td></tr>
+            <tr><th scope="row">Failed</th><td><span className={`stockhub-receipt-summary-count ${failed > 0 ? "stockhub-receipt-summary-count--error" : "stockhub-receipt-summary-count--success"}`}>{failed}</span></td></tr>
+            <tr><th scope="row">Blocked</th><td><span className={`stockhub-receipt-summary-count ${blocked > 0 ? "stockhub-receipt-summary-count--warning" : "stockhub-receipt-summary-count--success"}`}>{blocked}</span></td></tr>
+            <tr><th scope="row">Uncertain</th><td><span className={`stockhub-receipt-summary-count ${uncertain > 0 ? "stockhub-receipt-summary-count--warning" : "stockhub-receipt-summary-count--success"}`}>{uncertain}</span></td></tr>
+          </tbody>
+        </table>
+      </div>
       <s-paragraph>Product creation and inventory activation are separate stages; a created Draft product does not mean its import line or inventory step completed. Counts use persisted confirmed stage data only.</s-paragraph>
       {createdDraftInventoryFailures > 0 ? <s-banner tone="warning">Products were created, but inventory activation failed for {createdDraftInventoryFailures} Draft product{createdDraftInventoryFailures === 1 ? "" : "s"}. The saved receipt status has not been changed.</s-banner> : null}
       {actionData?.error ? <s-banner tone="critical">{actionData.error}</s-banner> : null}
@@ -262,7 +270,6 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
       </div> : null}
       <div className="stockhub-receipt-actions" role="group" aria-label="Receipt actions">
         <Form method="post"><input type="hidden" name="intent" value="verifyShopifyState"/><input type="hidden" name="batchId" value={batch.id}/><s-button type="submit">Verify Shopify State</s-button></Form>
-        <Form method="post" onSubmit={(event) => { if (!window.confirm(`Confirm ${batch.status === "PREVIEWED" ? "merge" : "resume"} for receipt ${batch.receiptCode} in ${batch.shop}?`)) event.preventDefault(); }}><input type="hidden" name="intent" value={batch.status === "PREVIEWED" ? "merge" : "resume"}/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="confirmed" value="yes"/><s-button type="submit" disabled={mergeDisabled}>{batch.status === "PREVIEWED" ? "Merge" : "Resume"} eligible lines</s-button></Form>
       </div>
       {mergeDisabledReason ? <s-banner tone="warning">{mergeDisabledReason}</s-banner> : null}
       <s-heading>Line items</s-heading>
@@ -274,6 +281,9 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
             {(["PREVIEWED", "RUNNING", "SUCCEEDED", "FAILED", "BLOCKED", "UNCERTAIN"] as const).map((status) => <s-option key={status} value={status}>{statusLabel(status)}</s-option>)}
           </s-select>
         </s-grid>
+        <div className="stockhub-merge-action">
+          <Form method="post" onSubmit={(event) => { if (!window.confirm(`Confirm ${batch.status === "PREVIEWED" ? "merge" : "resume"} for receipt ${batch.receiptCode} in ${batch.shop}?`)) event.preventDefault(); }}><input type="hidden" name="intent" value={batch.status === "PREVIEWED" ? "merge" : "resume"}/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="confirmed" value="yes"/><s-button type="submit" variant="primary" disabled={mergeDisabled}>{batch.status === "PREVIEWED" ? "Merge" : "Resume"} eligible lines</s-button></Form>
+        </div>
         <s-text>{filteredLines.length} of {batch.lines.length} line items · Page {Math.min(linePage + 1, linePageCount)} of {linePageCount}</s-text>
         <s-table variant="auto">
         <s-table-header-row><s-table-header listSlot="primary" format="base">SKU</s-table-header><s-table-header listSlot="labeled" format="base">Product</s-table-header><s-table-header listSlot="labeled" format="numeric">Quantity</s-table-header><s-table-header listSlot="labeled" format="base">Progress</s-table-header><s-table-header listSlot="labeled" format="base">Details</s-table-header></s-table-header-row>

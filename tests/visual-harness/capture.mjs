@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 
 const pageName = process.argv[2] ?? "overview";
-assert.ok(["overview", "products", "products-sku", "new-import"].includes(pageName), "visual page must be overview, products, products-sku, or new-import");
+assert.ok(["overview", "products", "products-sku", "new-import", "receipt-actions"].includes(pageName), "visual page must be overview, products, products-sku, new-import, or receipt-actions");
 
 const pages = await (await fetch("http://127.0.0.1:9223/json/list")).json();
 const page = pages.find((item) => item.type === "page");
@@ -64,6 +64,33 @@ for (const width of [1280, 390]) {
     interaction = { expanded: expanded.result.value, collapsed: collapsed.result.value };
     await writeFile(new URL(`./screenshots/${pageName}-${width}-interaction.json`, import.meta.url), JSON.stringify(interaction, null, 2));
   }
+  if (pageName === "receipt-actions") {
+    const rejected = await command("Runtime.evaluate", {
+      expression: `(async () => {
+        window.confirm = () => false;
+        document.querySelector('.stockhub-merge-action s-button')?.shadowRoot?.querySelector('button')?.click();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return document.querySelector('.receipt-action-result')?.textContent ?? null;
+      })()`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    assert.equal(rejected.result.value, null, "canceling the confirmation must not submit the Merge form");
+
+    const accepted = await command("Runtime.evaluate", {
+      expression: `(async () => {
+        window.confirm = () => true;
+        document.querySelector('.stockhub-merge-action s-button')?.shadowRoot?.querySelector('button')?.click();
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        return document.querySelector('.receipt-action-result')?.textContent ?? null;
+      })()`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    interaction = { canceledSubmission: rejected.result.value, confirmedSubmission: accepted.result.value };
+    assert.equal(interaction.confirmedSubmission, JSON.stringify({ intent: "merge", batchId: "fixture-batch-001", confirmed: "yes" }), "explicit confirmation must submit the original React Router Form fields");
+    await writeFile(new URL(`./screenshots/${pageName}-${width}-interaction.json`, import.meta.url), JSON.stringify(interaction, null, 2));
+  }
   console.log(width, JSON.stringify(metrics));
   try {
   assert.equal(metrics.ready, "true", "React route presentation must finish rendering");
@@ -88,6 +115,38 @@ for (const width of [1280, 390]) {
     assert.ok(layout.cards[0].y < layout.cards[1].y && layout.cards[1].y < layout.cards[2].y,
       "KPI cards must stack on mobile");
   }
+  }
+  if (pageName === "receipt-actions") {
+    assert.equal(layout.receiptActions.summary.caption, "Import progress summary");
+    assert.equal(layout.receiptActions.summary.rowCount, 7, "all persisted receipt summary metrics must render as table rows");
+    assert.ok(layout.receiptActions.summary.width - layout.receiptActions.summary.scrollWidth <= 2,
+      "receipt summary table must fit its container at desktop and mobile widths");
+    assert.ok(layout.receiptActions.summary.tones.includes("stockhub-receipt-summary-count--success"));
+    assert.ok(layout.receiptActions.summary.tones.includes("stockhub-receipt-summary-count--neutral"));
+    assert.ok(!layout.receiptActions.summary.tones.some((tone) => tone.endsWith("--warning") || tone.endsWith("--error")),
+      "zero problem counts must not look like warnings or errors");
+    assert.equal(layout.polarisButtonDefined, true, "Polaris s-button must be registered");
+    assert.ok(layout.receiptActions.searchFieldRect, "line-item search field must be rendered");
+    assert.ok(layout.receiptActions.searchFieldRect.bottom < layout.receiptActions.shadowButton.rect.y,
+      "primary Merge action must appear below Search line items");
+    assert.equal(layout.receiptActions.variant, "primary", "Merge action must use the primary Polaris variant");
+    assert.equal(layout.receiptActions.customElementDefined, true);
+    assert.equal(layout.receiptActions.searchLabel, "Search line items", "line-item search control must be rendered");
+    assert.equal(layout.receiptActions.host.display, "contents", "Polaris button hosts intentionally use display: contents");
+    assert.equal(layout.receiptActions.host.clientRectCount, 0, "the custom-element host itself has no layout box");
+    assert.ok(layout.receiptActions.shadowButton.rect.width > 0 && layout.receiptActions.shadowButton.rect.height > 0, "the internal Polaris button must have visible geometry");
+    assert.equal(layout.receiptActions.shadowButton.visibility, "visible");
+    assert.equal(layout.receiptActions.shadowButton.opacity, "1");
+    assert.ok(layout.receiptActions.shadowButton.rect.x >= 0 && layout.receiptActions.shadowButton.rect.y >= 0,
+      "the internal Polaris button must not be positioned above or left of the viewport");
+    assert.ok(layout.receiptActions.shadowButton.rect.right <= width && layout.receiptActions.shadowButton.rect.bottom <= 900,
+      "the internal Polaris button must fit inside the viewport");
+    assert.ok(layout.receiptActions.ancestors.every((ancestor) => ancestor.display !== "none"
+      && ancestor.visibility === "visible" && ancestor.opacity !== "0"
+      && ![ancestor.overflowX, ancestor.overflowY].some((overflow) => ["hidden", "clip"].includes(overflow))),
+    "no ancestor may hide or clip the Merge action");
+    assert.match(metrics.body, /Merge eligible lines/, "the Merge label must be exposed in the rendered page");
+    assert.equal(interaction.confirmedSubmission, JSON.stringify({ intent: "merge", batchId: "fixture-batch-001", confirmed: "yes" }));
   }
   if (pageName.startsWith("products")) {
     const catalog = layout.products;

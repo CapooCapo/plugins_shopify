@@ -15,11 +15,17 @@ google-chrome-stable --headless=new --no-sandbox --disable-gpu --disable-dev-shm
 node tests/visual-harness/capture.mjs overview
 node tests/visual-harness/capture.mjs products
 node tests/visual-harness/capture.mjs products-sku
+node tests/visual-harness/capture.mjs receipt-actions
 ```
 
 `capture.mjs` writes PNGs and JSON measurements to `screenshots/` and asserts the key
 Overview and Products layout contracts. Products checks include collapsed row density,
 SKU identity, pagination URLs, honest inventory values, and Details expand/collapse.
+The `receipt-actions` check inspects Polaris custom-element registration, host and
+shadow-button geometry, ancestor visibility/clipping, and the React Router form's
+cancel-versus-confirm submission behavior at desktop and mobile widths. The host
+uses `display: contents`, so inspect the shadow button's rectangle rather than the
+zero-sized custom-element host rectangle.
 Inspect the PNGs visually as well; geometry checks alone cannot
 judge hierarchy or readability. `polaris.js` was fetched from
 `https://cdn.shopify.com/shopifycloud/polaris.js` for offline/reliable local rendering.
