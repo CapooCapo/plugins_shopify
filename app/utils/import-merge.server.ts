@@ -149,6 +149,15 @@ type MergeInput = {
   now?: () => Date;
 };
 
+type MergeWorkerInput = MergeInput & { leaseAt: Date };
+
+class MergeLeaseLostError extends Error {
+  constructor() {
+    super("This Merge worker no longer owns the receipt lease.");
+    this.name = "MergeLeaseLostError";
+  }
+}
+
 type ShopifyUserError = { field?: string[] | null; message: string; code?: string | null };
 type ShopifyProductVariant = {
   id: string;
@@ -233,16 +242,44 @@ function resultLine(line: ImportLine): ImportLineResult {
   };
 }
 
+async function renewLease(input: MergeWorkerInput, now: () => Date) {
+  const renewedAt = now();
+  const renewed = await input.prisma.importBatch.updateMany({
+    where: {
+      id: input.batchId,
+      shop: input.shop,
+      status: "RUNNING",
+      updatedAt: input.leaseAt,
+    },
+    data: { updatedAt: renewedAt },
+  });
+  if (renewed.count !== 1) throw new MergeLeaseLostError();
+  input.leaseAt = renewedAt;
+}
+
 async function markLine(
-  prisma: PrismaClient,
+  input: MergeWorkerInput,
   lineId: string,
   now: () => Date,
   data: Partial<ImportLine>,
 ) {
-  return prisma.importLine.update({
-    where: { id: lineId },
+  await renewLease(input, now);
+  const updated = await input.prisma.importLine.updateMany({
+    where: {
+      id: lineId,
+      batch: {
+        is: {
+          id: input.batchId,
+          shop: input.shop,
+          status: "RUNNING",
+          updatedAt: input.leaseAt,
+        },
+      },
+    },
     data: { ...data, updatedAt: now() },
   });
+  if (updated.count !== 1) throw new MergeLeaseLostError();
+  return input.prisma.importLine.findUniqueOrThrow({ where: { id: lineId } });
 }
 
 async function readLocations(admin: AdminApiContext) {
@@ -300,16 +337,21 @@ async function findByMarker(admin: AdminApiContext, marker: string, locationId: 
 }
 
 async function saveBatchState(
-  prisma: PrismaClient,
-  batchId: string,
+  input: MergeWorkerInput,
   status: string,
   now: () => Date,
   completedAt: Date | null = null,
 ) {
-  await prisma.importBatch.update({
-    where: { id: batchId },
+  const updated = await input.prisma.importBatch.updateMany({
+    where: {
+      id: input.batchId,
+      shop: input.shop,
+      status: "RUNNING",
+      updatedAt: input.leaseAt,
+    },
     data: { status, updatedAt: now(), completedAt },
   });
+  if (updated.count !== 1) throw new MergeLeaseLostError();
 }
 
 function draftUserErrors(errors: ShopifyUserError[], stage: string) {
@@ -321,7 +363,7 @@ function draftUserErrors(errors: ShopifyUserError[], stage: string) {
 }
 
 async function ensureDraftProduct(
-  input: MergeInput,
+  input: MergeWorkerInput,
   batch: ImportBatch,
   line: ImportLine,
   now: () => Date,
@@ -338,14 +380,14 @@ async function ensureDraftProduct(
     try {
       products = await findByMarker(input.admin, marker, batch.locationId);
     } catch (error) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "UNCERTAIN",
         errorCode: "PRODUCT_RECONCILE_FAILED",
         errorDetail: error instanceof Error ? error.message : "Unable to reconcile draft product.",
       });
     }
     if (products.length > 1) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: isLegacyInventoryActivationFailure ? "UNCERTAIN" : "BLOCKED",
         errorCode: "DUPLICATE_PRODUCT_MARKER",
         errorDetail: "More than one Shopify product has this import operation marker.",
@@ -354,7 +396,7 @@ async function ensureDraftProduct(
     if (products.length === 1) {
       const product = products[0];
       if (product.metafield?.value !== line.operationId) {
-        return markLine(input.prisma, line.id, now, {
+        return markLine(input, line.id, now, {
           status: isLegacyInventoryActivationFailure ? "UNCERTAIN" : "BLOCKED",
           productId: product.id,
           errorCode: "DRAFT_HANDLE_COLLISION",
@@ -362,7 +404,7 @@ async function ensureDraftProduct(
         });
       }
       if (product.status !== "DRAFT") {
-        return markLine(input.prisma, line.id, now, {
+        return markLine(input, line.id, now, {
           status: isLegacyInventoryActivationFailure ? "UNCERTAIN" : "BLOCKED",
           productId: product.id,
           errorCode: "DRAFT_STATUS_CHANGED",
@@ -371,7 +413,7 @@ async function ensureDraftProduct(
       }
       const variant = product.variants.nodes[0];
       if (!variant) {
-        return markLine(input.prisma, line.id, now, {
+        return markLine(input, line.id, now, {
           status: "UNCERTAIN",
           productId: product.id,
           errorCode: "DRAFT_VARIANT_MISSING",
@@ -390,7 +432,7 @@ async function ensureDraftProduct(
           !variant.inventoryItem.tracked ||
           available
         ) {
-          return markLine(input.prisma, line.id, now, {
+          return markLine(input, line.id, now, {
             status: "UNCERTAIN",
             errorCode: "LEGACY_INVENTORY_ACTIVATION_RECONCILIATION_REQUIRED",
             errorDetail: "The legacy inventory activation could not be safely retried: the marked Draft, SKU, inventory item, or location-level inventory did not match the saved operation, or inventory already exists. No mutation was attempted.",
@@ -398,11 +440,11 @@ async function ensureDraftProduct(
         }
         // Shopify definitively rejected the old input. Persist a new key before
         // retrying with changed mutation parameters to avoid idempotency replay.
-        current = await markLine(input.prisma, line.id, now, {
+        current = await markLine(input, line.id, now, {
           idempotencyKey: randomUUID(),
         });
       }
-      current = await markLine(input.prisma, line.id, now, {
+      current = await markLine(input, line.id, now, {
         status: "RUNNING",
         stage: current.stage === "PRODUCT_CREATING" ? "PRODUCT_CREATED" : current.stage,
         productId: product.id,
@@ -413,7 +455,7 @@ async function ensureDraftProduct(
         errorDetail: null,
       });
     } else if (isLegacyInventoryActivationFailure || current.status === "UNCERTAIN" || current.status === "RUNNING") {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "UNCERTAIN",
         errorCode: isLegacyInventoryActivationFailure
           ? "LEGACY_INVENTORY_ACTIVATION_RECONCILIATION_REQUIRED"
@@ -430,7 +472,7 @@ async function ensureDraftProduct(
     current.status === "FAILED" &&
     ["PRODUCT_CREATE_USER_ERROR", "SKU_RECHECK_FAILED"].includes(current.errorCode ?? "")
   ) {
-    current = await markLine(input.prisma, line.id, now, {
+    current = await markLine(input, line.id, now, {
       status: "RUNNING",
       errorCode: null,
       errorDetail: null,
@@ -444,7 +486,7 @@ async function ensureDraftProduct(
       batch.locationId,
     );
     if (incomplete || matches.length !== 0) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "BLOCKED",
         errorCode: incomplete ? "SKU_LOOKUP_INCOMPLETE" : "SKU_NO_LONGER_UNMATCHED",
         errorDetail: incomplete
@@ -453,13 +495,13 @@ async function ensureDraftProduct(
       });
     }
     if (!line.title || !line.price || line.quantity === null) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "BLOCKED",
         errorCode: "NEW_PRODUCT_FIELDS_MISSING",
         errorDetail: "A new SKU requires a title, valid price, and positive quantity.",
       });
     }
-    current = await markLine(input.prisma, line.id, now, {
+    current = await markLine(input, line.id, now, {
       status: "RUNNING",
       stage: "PRODUCT_CREATING",
       errorCode: null,
@@ -469,7 +511,7 @@ async function ensureDraftProduct(
 
   if (current.stage === "PRODUCT_CREATING" && current.status === "RUNNING") {
     if (!current.title || !current.price || current.quantity === null) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "BLOCKED",
         errorCode: "NEW_PRODUCT_FIELDS_MISSING",
         errorDetail: "A new SKU requires a title, valid price, and positive quantity.",
@@ -480,14 +522,14 @@ async function ensureDraftProduct(
     try {
       latestMatches = await exactSkuMatches(input.admin, current.sku, batch.locationId);
     } catch (error) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "FAILED",
         errorCode: "SKU_RECHECK_FAILED",
         errorDetail: error instanceof Error ? error.message : "SKU could not be rechecked before product creation.",
       });
     }
     if (latestMatches.incomplete || latestMatches.matches.length !== 0) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "BLOCKED",
         errorCode: latestMatches.incomplete ? "SKU_LOOKUP_INCOMPLETE" : "SKU_NO_LONGER_UNMATCHED",
         errorDetail: latestMatches.incomplete
@@ -496,6 +538,7 @@ async function ensureDraftProduct(
       });
     }
     try {
+      await renewLease(input, now);
       const data = await graphQL<{
         productCreate: {
           product: ReconciledDraftProduct | null;
@@ -520,7 +563,7 @@ async function ensureDraftProduct(
       const payload = data.productCreate;
       if (payload.userErrors?.length) {
         if (payload.product?.id) {
-          return markLine(input.prisma, line.id, now, {
+          return markLine(input, line.id, now, {
             status: "UNCERTAIN",
             stage: "PRODUCT_CREATING",
             productId: payload.product.id,
@@ -528,7 +571,7 @@ async function ensureDraftProduct(
             errorDetail: errorText(payload.userErrors),
           });
         }
-        return markLine(input.prisma, line.id, now, {
+        return markLine(input, line.id, now, {
           ...draftUserErrors(payload.userErrors, "PRODUCT_CREATE"),
           stage: "PRODUCT_CREATING",
         });
@@ -541,7 +584,7 @@ async function ensureDraftProduct(
         product.metafield?.value !== current.operationId ||
         !variant?.inventoryItem?.id
       ) {
-        return markLine(input.prisma, line.id, now, {
+        return markLine(input, line.id, now, {
           status: "UNCERTAIN",
           productId: product?.id ?? null,
           variantId: variant?.id ?? null,
@@ -550,7 +593,7 @@ async function ensureDraftProduct(
           errorDetail: "Shopify did not return the Draft and initial variant IDs; reconciliation is required.",
         });
       }
-      current = await markLine(input.prisma, line.id, now, {
+      current = await markLine(input, line.id, now, {
         status: "RUNNING",
         stage: "PRODUCT_CREATED",
         productId: product.id,
@@ -561,7 +604,7 @@ async function ensureDraftProduct(
         errorDetail: null,
       });
     } catch (error) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "UNCERTAIN",
         errorCode: "PRODUCT_CREATE_UNCERTAIN",
         errorDetail: error instanceof Error ? error.message : "Shopify product creation outcome is unknown.",
@@ -570,7 +613,7 @@ async function ensureDraftProduct(
   }
 
   if (!current.productId || !current.variantId || !current.inventoryItemId) {
-    return markLine(input.prisma, line.id, now, {
+    return markLine(input, line.id, now, {
       status: "UNCERTAIN",
       errorCode: "DRAFT_IDS_MISSING",
       errorDetail: "The saved Draft product identifiers are incomplete; reconcile before retrying.",
@@ -578,11 +621,12 @@ async function ensureDraftProduct(
   }
 
   if (current.stage === "PRODUCT_CREATED" || current.stage === "INVENTORY_ITEM_CONFIGURING") {
-    current = await markLine(input.prisma, line.id, now, {
+    current = await markLine(input, line.id, now, {
       status: "RUNNING",
       stage: "INVENTORY_ITEM_CONFIGURING",
     });
     try {
+      await renewLease(input, now);
       const data = await graphQL<{
         inventoryItemUpdate: {
           inventoryItem: { id: string; sku: string; tracked: boolean } | null;
@@ -594,20 +638,20 @@ async function ensureDraftProduct(
       });
       const payload = data.inventoryItemUpdate;
       if (payload.userErrors?.length) {
-        return markLine(input.prisma, line.id, now, {
+        return markLine(input, line.id, now, {
           ...draftUserErrors(payload.userErrors, "INVENTORY_ITEM_SETUP"),
           stage: "INVENTORY_ITEM_CONFIGURING",
         });
       }
       const inventoryItem = payload.inventoryItem;
       if (!inventoryItem || inventoryItem.sku !== current.sku || !inventoryItem.tracked) {
-        return markLine(input.prisma, line.id, now, {
+        return markLine(input, line.id, now, {
           status: "UNCERTAIN",
           errorCode: "INVENTORY_ITEM_SETUP_UNCONFIRMED",
           errorDetail: "Shopify did not confirm the Draft inventory item SKU and tracking state.",
         });
       }
-      current = await markLine(input.prisma, line.id, now, {
+      current = await markLine(input, line.id, now, {
         status: "RUNNING",
         stage: "INVENTORY_ITEM_CONFIGURED",
         inventoryItemId: inventoryItem.id,
@@ -615,7 +659,7 @@ async function ensureDraftProduct(
         errorDetail: null,
       });
     } catch (error) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "UNCERTAIN",
         errorCode: "INVENTORY_ITEM_SETUP_UNCERTAIN",
         errorDetail: error instanceof Error ? error.message : "Draft inventory item setup outcome is unknown.",
@@ -625,17 +669,18 @@ async function ensureDraftProduct(
 
   if (current.stage === "INVENTORY_ITEM_CONFIGURED" || current.stage === "VARIANT_PRICE_CONFIGURING") {
     if (!current.price) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "BLOCKED",
         errorCode: "NEW_PRODUCT_PRICE_MISSING",
         errorDetail: "The Draft product price is missing; inventory was not activated.",
       });
     }
-    current = await markLine(input.prisma, line.id, now, {
+    current = await markLine(input, line.id, now, {
       status: "RUNNING",
       stage: "VARIANT_PRICE_CONFIGURING",
     });
     try {
+      await renewLease(input, now);
       const data = await graphQL<{
         productVariantsBulkUpdate: {
           productVariants: Array<{ id: string; price: string }>;
@@ -648,27 +693,27 @@ async function ensureDraftProduct(
       });
       const payload = data.productVariantsBulkUpdate;
       if (payload.userErrors.length) {
-        return markLine(input.prisma, line.id, now, {
+        return markLine(input, line.id, now, {
           ...draftUserErrors(payload.userErrors, "VARIANT_PRICE"),
           stage: "VARIANT_PRICE_CONFIGURING",
         });
       }
       const variant = payload.productVariants.find((item) => item.id === current.variantId);
       if (!variant || Number(variant.price) !== Number(current.price)) {
-        return markLine(input.prisma, line.id, now, {
+        return markLine(input, line.id, now, {
           status: "UNCERTAIN",
           errorCode: "VARIANT_PRICE_UNCONFIRMED",
           errorDetail: "Shopify did not confirm the Draft variant price.",
         });
       }
-      current = await markLine(input.prisma, line.id, now, {
+      current = await markLine(input, line.id, now, {
         status: "RUNNING",
         stage: "VARIANT_PRICE_CONFIGURED",
         errorCode: null,
         errorDetail: null,
       });
     } catch (error) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "UNCERTAIN",
         errorCode: "VARIANT_PRICE_UNCERTAIN",
         errorDetail: error instanceof Error ? error.message : "Draft variant price outcome is unknown.",
@@ -677,18 +722,19 @@ async function ensureDraftProduct(
   }
 
   if (current.stage === "VARIANT_PRICE_CONFIGURED" || current.stage === "INVENTORY_ACTIVATING") {
-    current = await markLine(input.prisma, line.id, now, {
+    current = await markLine(input, line.id, now, {
       status: "RUNNING",
       stage: "INVENTORY_ACTIVATING",
     });
     try {
       if (current.quantity === null) {
-        return markLine(input.prisma, line.id, now, {
+        return markLine(input, line.id, now, {
           status: "BLOCKED",
           errorCode: "INVALID_INCOMING_QUANTITY",
           errorDetail: "New product quantity is missing; inventory was not activated.",
         });
       }
+      await renewLease(input, now);
       const data = await graphQL<{
         inventoryActivate: {
           inventoryLevel: { id: string } | null;
@@ -702,26 +748,26 @@ async function ensureDraftProduct(
       });
       const payload = data.inventoryActivate;
       if (payload.userErrors?.length) {
-        return markLine(input.prisma, line.id, now, {
+        return markLine(input, line.id, now, {
           ...draftUserErrors(payload.userErrors, "INVENTORY_ACTIVATE"),
           stage: "INVENTORY_ACTIVATING",
         });
       }
       if (!payload.inventoryLevel?.id) {
-        return markLine(input.prisma, line.id, now, {
+        return markLine(input, line.id, now, {
           status: "UNCERTAIN",
           errorCode: "INVENTORY_ACTIVATE_UNCONFIRMED",
           errorDetail: "Shopify did not confirm inventory activation; retry will reuse its idempotency key.",
         });
       }
-      current = await markLine(input.prisma, line.id, now, {
+      current = await markLine(input, line.id, now, {
         status: "RUNNING",
         stage: "INVENTORY_ACTIVE",
         errorCode: null,
         errorDetail: null,
       });
     } catch (error) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "UNCERTAIN",
         errorCode: "INVENTORY_ACTIVATE_UNCERTAIN",
         errorDetail: error instanceof Error ? error.message : "Inventory activation outcome is unknown.",
@@ -729,7 +775,7 @@ async function ensureDraftProduct(
     }
   }
 
-  return markLine(input.prisma, line.id, now, {
+  return markLine(input, line.id, now, {
     status: "SUCCEEDED",
     stage: "COMPLETED",
     completedAt: now(),
@@ -739,7 +785,7 @@ async function ensureDraftProduct(
 }
 
 async function runLine(
-  input: MergeInput,
+  input: MergeWorkerInput,
   batch: ImportBatch,
   line: ImportLine,
   now: () => Date,
@@ -763,7 +809,7 @@ async function runLine(
     const retryDetail = isReconciliationRetry
       ? " Reconcile the previous uncertain attempt before any further adjustment."
       : " Upload a fresh preview before merging.";
-    return markLine(input.prisma, line.id, now, {
+    return markLine(input, line.id, now, {
       status: isReconciliationRetry ? "UNCERTAIN" : "BLOCKED",
       errorCode: incomplete ? "SKU_LOOKUP_INCOMPLETE" : "SKU_MATCH_CHANGED",
       errorDetail: incomplete
@@ -782,7 +828,7 @@ async function runLine(
     variant.id !== line.variantId ||
     variant.inventoryItem.id !== line.inventoryItemId
   ) {
-    return markLine(input.prisma, line.id, now, {
+    return markLine(input, line.id, now, {
       status: isReconciliationRetry ? "UNCERTAIN" : "BLOCKED",
       errorCode: "SKU_TARGET_CHANGED",
       errorDetail: isReconciliationRetry
@@ -798,7 +844,7 @@ async function runLine(
       retryAgeMs < 0 ||
       retryAgeMs >= MAX_AUTOMATIC_ADJUST_RETRY_AGE_MS
     ) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "UNCERTAIN",
         errorCode: "INVENTORY_ADJUST_RECONCILIATION_REQUIRED",
         errorDetail: "The Shopify adjustment idempotency window cannot be proven safe for an automatic retry. Reconcile this receipt and inventory change manually before any further stock adjustment.",
@@ -807,7 +853,7 @@ async function runLine(
   }
   const level = variant.inventoryItem.inventoryLevel;
   if (!variant.inventoryItem.tracked || !level) {
-    return markLine(input.prisma, line.id, now, {
+    return markLine(input, line.id, now, {
       status: isReconciliationRetry ? "UNCERTAIN" : "BLOCKED",
       errorCode: !variant.inventoryItem.tracked ? "INVENTORY_NOT_TRACKED" : "LOCATION_NOT_STOCKED",
       errorDetail: !variant.inventoryItem.tracked
@@ -816,7 +862,7 @@ async function runLine(
     });
   }
   if (line.quantity === null || line.quantity <= 0) {
-    return markLine(input.prisma, line.id, now, {
+    return markLine(input, line.id, now, {
       status: isReconciliationRetry ? "UNCERTAIN" : "BLOCKED",
       errorCode: "INVALID_INCOMING_QUANTITY",
       errorDetail: "Incoming quantity must be a positive whole number.",
@@ -827,21 +873,21 @@ async function runLine(
     (quantity: { name: string; quantity: number }) => quantity.name === "available",
   )?.quantity;
   if (line.expectedQuantity === null || currentAvailable === undefined) {
-    return markLine(input.prisma, line.id, now, {
+    return markLine(input, line.id, now, {
       status: isReconciliationRetry ? "UNCERTAIN" : "BLOCKED",
       errorCode: "AVAILABLE_QUANTITY_UNAVAILABLE",
       errorDetail: "Shopify did not return the selected location's available quantity; no adjustment was attempted.",
     });
   }
   if (!isReconciliationRetry && currentAvailable !== line.expectedQuantity) {
-    return markLine(input.prisma, line.id, now, {
+    return markLine(input, line.id, now, {
       status: "BLOCKED",
       errorCode: "INVENTORY_CHANGED_SINCE_PREVIEW",
       errorDetail: "Available inventory changed after preview. Upload a fresh preview with a new receipt before merging.",
     });
   }
   const targetUrl = adminProductUrl(input.shop, variant.product.id);
-  await markLine(input.prisma, line.id, now, {
+  await markLine(input, line.id, now, {
     status: "RUNNING",
     stage: "INVENTORY_ADJUSTING",
     productId: variant.product.id,
@@ -854,6 +900,7 @@ async function runLine(
     errorDetail: null,
   });
   try {
+    await renewLease(input, now);
     const data = await graphQL<{
       inventoryAdjustQuantities: {
         inventoryAdjustmentGroup: { id: string } | null;
@@ -877,7 +924,7 @@ async function runLine(
     });
     const payload = data.inventoryAdjustQuantities;
     if (payload.userErrors?.length) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         ...draftUserErrors(payload.userErrors, "INVENTORY_ADJUST"),
         stage: "INVENTORY_ADJUSTING",
         productId: variant.product.id,
@@ -887,7 +934,7 @@ async function runLine(
       });
     }
     if (!payload.inventoryAdjustmentGroup?.id) {
-      return markLine(input.prisma, line.id, now, {
+      return markLine(input, line.id, now, {
         status: "UNCERTAIN",
         errorCode: "INVENTORY_ADJUST_UNCONFIRMED",
         errorDetail: "Shopify returned no adjustment ID; retry will reuse the persisted idempotency key.",
@@ -897,7 +944,7 @@ async function runLine(
         shopifyProductUrl: targetUrl,
       });
     }
-    return markLine(input.prisma, line.id, now, {
+    return markLine(input, line.id, now, {
       status: "SUCCEEDED",
       stage: "COMPLETED",
       completedAt: now(),
@@ -911,7 +958,7 @@ async function runLine(
       errorDetail: null,
     });
   } catch (error) {
-    return markLine(input.prisma, line.id, now, {
+    return markLine(input, line.id, now, {
       status: "UNCERTAIN",
       errorCode: "INVENTORY_ADJUST_UNCERTAIN",
       errorDetail: error instanceof Error ? error.message : "Inventory adjustment outcome is unknown.",
@@ -952,6 +999,7 @@ export async function mergeImportBatch({
   }
 
   const staleAt = new Date(now().getTime() - 15 * 60 * 1000);
+  const claimAt = now();
   const claim = await prisma.importBatch.updateMany({
     where: {
       id: batchId,
@@ -961,7 +1009,7 @@ export async function mergeImportBatch({
         { status: "RUNNING", updatedAt: { lt: staleAt } },
       ],
     },
-    data: { status: "RUNNING", updatedAt: now() },
+    data: { status: "RUNNING", updatedAt: claimAt },
   });
   if (claim.count !== 1) {
     throw new MergeImportError("This import is already being processed. Refresh before retrying.", "BATCH_ALREADY_RUNNING");
@@ -975,9 +1023,10 @@ export async function mergeImportBatch({
     throw new MergeImportError("Import batch was not found for this store.", "BATCH_NOT_FOUND");
   }
   batch = claimedBatch;
+  const worker: MergeWorkerInput = { shop, batchId, admin, prisma, now, leaseAt: claimAt };
   let lines = batch.lines;
   if (lines.length === 0 || lines.length > MAX_MERGE_LINES) {
-    await saveBatchState(prisma, batchId, "FAILED", now);
+    await saveBatchState(worker, "FAILED", now);
     throw new MergeImportError(
       `A merge must contain between 1 and ${MAX_MERGE_LINES} rows. Split larger CSV files.`,
       "BATCH_LIMIT",
@@ -987,7 +1036,7 @@ export async function mergeImportBatch({
     lines.some((line) => line.status === "BLOCKED" || line.operationType === "BLOCKED") &&
     lines.every((line) => line.status === "PREVIEWED" || line.status === "BLOCKED")
   ) {
-    await saveBatchState(prisma, batchId, "FAILED", now);
+    await saveBatchState(worker, "FAILED", now);
     return { batchId, status: "FAILED", lines: lines.map(resultLine) };
   }
 
@@ -997,7 +1046,7 @@ export async function mergeImportBatch({
       (location) => location.id === batch.locationId,
     );
   } catch (error) {
-    await saveBatchState(prisma, batchId, "UNCERTAIN", now);
+    await saveBatchState(worker, "UNCERTAIN", now);
     throw new MergeImportError(
       error instanceof Error ? error.message : "Unable to verify the selected location.",
       "LOCATION_LOOKUP_FAILED",
@@ -1013,7 +1062,7 @@ export async function mergeImportBatch({
         line.status === "UNCERTAIN" ||
         (line.stage !== "PREPARED" && ["RUNNING", "FAILED"].includes(line.status));
       const reconciliationDetail = `${detail} Reconcile this line before retrying; its previous Shopify mutation outcome may be unknown.`;
-      await markLine(prisma, line.id, now, mayHaveReachedShopify
+      await markLine(worker, line.id, now, mayHaveReachedShopify
         ? {
             status: "UNCERTAIN",
             errorCode: line.errorCode ?? "LOCATION_RECONCILIATION_REQUIRED",
@@ -1031,20 +1080,28 @@ export async function mergeImportBatch({
     const successful = lines.some((line) => line.status === "SUCCEEDED");
     const uncertain = lines.some((line) => line.status === "UNCERTAIN");
     const status = successful ? "PARTIAL" : uncertain ? "UNCERTAIN" : "FAILED";
-    await saveBatchState(prisma, batchId, status, now);
+    await saveBatchState(worker, status, now);
     return { batchId, status, lines: lines.map(resultLine) };
   }
 
   for (const line of lines) {
     if (line.status === "SUCCEEDED" || line.status === "BLOCKED") continue;
     try {
-      await prisma.importBatch.update({
-        where: { id: batchId },
-        data: { updatedAt: now() },
-      });
-      await runLine({ shop, batchId, admin, prisma, now }, batch, line, now);
+      await renewLease(worker, now);
+      await runLine(worker, batch, line, now);
     } catch (error) {
-      await markLine(prisma, line.id, now, {
+      if (error instanceof MergeLeaseLostError) {
+        const currentBatch = await prisma.importBatch.findFirst({
+          where: { id: batchId, shop },
+          include: { lines: { orderBy: { rowNumber: "asc" } } },
+        });
+        return {
+          batchId,
+          status: currentBatch?.status ?? "UNCERTAIN",
+          lines: currentBatch?.lines.map(resultLine) ?? [],
+        };
+      }
+      await markLine(worker, line.id, now, {
         status: "UNCERTAIN",
         errorCode: "LINE_EXECUTION_UNCERTAIN",
         errorDetail: error instanceof Error ? error.message : "Line execution outcome is unknown.",
@@ -1068,8 +1125,7 @@ export async function mergeImportBatch({
         ? "PARTIAL"
         : "FAILED";
   await saveBatchState(
-    prisma,
-    batchId,
+    worker,
     status,
     now,
     hasUnresolvedOutcome ? null : now(),

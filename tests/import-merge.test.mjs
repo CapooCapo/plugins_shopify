@@ -77,8 +77,14 @@ function matchesWhere(record, where = {}) {
   return Object.entries(where).every(([key, condition]) => {
     if (key === "OR") return condition.some((entry) => matchesWhere(record, entry));
     if (key === "AND") return condition.every((entry) => matchesWhere(record, entry));
+    if (key === "batch" && condition && typeof condition === "object" && "is" in condition) {
+      return matchesWhere(record.batch, condition.is);
+    }
 
     const actual = record[key];
+    if (actual instanceof Date && condition instanceof Date) {
+      return actual.getTime() === condition.getTime();
+    }
     if (condition && typeof condition === "object" && !(condition instanceof Date)) {
       if ("in" in condition) return condition.in.includes(actual);
       if ("notIn" in condition) return !condition.notIn.includes(actual);
@@ -142,9 +148,18 @@ function makePrisma({ batch, lines = batch.lines, beforeClaim, failSucceededLine
         return structuredClone(line);
       },
       async updateMany({ where, data }) {
-        const selected = state.lines.filter((line) => matchesWhere(line, where));
+        const selected = state.lines.filter((line) => matchesWhere({ ...line, batch: state.batch }, where));
+        if (selected.length && failSucceededLineUpdateOnce && data.status === "SUCCEEDED") {
+          failSucceededLineUpdateOnce = false;
+          throw new Error("simulated Prisma write failure after Shopify accepted mutation");
+        }
         for (const line of selected) Object.assign(line, structuredClone(data));
         return { count: selected.length };
+      },
+      async findUniqueOrThrow({ where }) {
+        const line = state.lines.find((candidate) => matchesWhere(candidate, where));
+        if (!line) throw new Error("ImportLine not found");
+        return structuredClone(line);
       },
     },
     async $transaction(callback) {
