@@ -1032,13 +1032,9 @@ export async function mergeImportBatch({
       "BATCH_LIMIT",
     );
   }
-  if (
-    lines.some((line) => line.status === "BLOCKED" || line.operationType === "BLOCKED") &&
-    lines.every((line) => line.status === "PREVIEWED" || line.status === "BLOCKED")
-  ) {
-    await saveBatchState(worker, "FAILED", now);
-    return { batchId, status: "FAILED", lines: lines.map(resultLine) };
-  }
+  // Explicitly confirmed partial imports may contain validation-blocked rows.
+  // They remain attached to the receipt; the processing loop skips them below.
+  // The action layer requires a current eligible-row count confirmation.
 
   let verifiedLocation: { id: string; name: string; isActive: boolean } | undefined;
   try {

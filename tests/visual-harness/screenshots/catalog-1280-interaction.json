@@ -1,0 +1,17 @@
+{
+  "uploadedFixture": "catalog-vietnamese.csv",
+  "mapped": "Vietnamese aliases plus Vendor override and Quantity ignore",
+  "previewed": true,
+  "confirmed": true,
+  "duplicateMappingRejected": true,
+  "missingRequiredMappingRejected": true,
+  "confirmedZeroPrice": true,
+  "negativePriceVisible": true,
+  "manualAddEditDelete": true,
+  "shopifyMutationCalls": 0,
+  "groupSuggestionsVisible": true,
+  "explicitGroupAcceptance": true,
+  "groupCount": 3,
+  "mobileVariantCards": false,
+  "mockReloadRestored": true
+}

@@ -95,8 +95,8 @@ function makeAdmin({ shop, scopes, locationActive = true, calls, skuBarrier }) {
   };
 }
 
-function mergeRequest(batchId, intent = "merge", confirmed = "yes") {
-  const form = new URLSearchParams({ intent, batchId, confirmed });
+function mergeRequest(batchId, intent = "merge", confirmed = "yes", confirmedCount = "1") {
+  const form = new URLSearchParams({ intent, batchId, confirmed, confirmedCount });
   return new Request(`http://localhost/app/imports/history/${batchId}`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Test-Request": crypto.randomUUID() },
@@ -175,11 +175,33 @@ test("actual Import History route action serializes concurrent Merge POSTs on is
 
   // A third HTTP Resume through the same action must observe completion and
   // perform no repeated create or activation.
-  const beforeResume = mutationCalls.filter(({ name }) => ["StockHubCreateDraft", "StockHubActivateDraftInventory"].includes(name)).length;
-  const resumeResponse = await action({ request: mergeRequest(batchId, "resume"), params: { batchId }, context: {} });
-  const afterResume = mutationCalls.filter(({ name }) => ["StockHubCreateDraft", "StockHubActivateDraftInventory"].includes(name)).length;
+  const writeOperations = ["StockHubCreateDraft", "StockHubUpdateDraftInventoryItem", "StockHubSetDraftPrice", "StockHubActivateDraftInventory"];
+  const beforeResume = mutationCalls.filter(({ name }) => writeOperations.includes(name)).length;
+  const beforeReplay = await prisma.importBatch.findFirstOrThrow({ where: { id: batchId, shop }, include: { lines: true, activityLogs: true } });
+  const staleCountResume = await action({ request: mergeRequest(batchId, "resume", "yes", "1"), params: { batchId }, context: {} });
+  assert.equal(staleCountResume.error, "Confirm the current number of eligible rows and any excluded rows before merging.");
+  const resumeResponse = await action({ request: mergeRequest(batchId, "resume", "yes", "0"), params: { batchId }, context: {} });
+  const afterResume = mutationCalls.filter(({ name }) => writeOperations.includes(name)).length;
   assert.equal(resumeResponse.status, 302);
   assert.equal(afterResume, beforeResume);
+
+  // Replaying an already-completed Resume repeatedly must remain a no-op for
+  // Shopify writes, persisted line results, and activity history.
+  const repeatedResumeResponse = await action({ request: mergeRequest(batchId, "resume", "yes", "0"), params: { batchId }, context: {} });
+  const afterRepeatedResume = mutationCalls.filter(({ name }) => writeOperations.includes(name)).length;
+  const afterReplay = await prisma.importBatch.findFirstOrThrow({ where: { id: batchId, shop }, include: { lines: true, activityLogs: true } });
+  assert.equal(repeatedResumeResponse.status, 302);
+  assert.equal(afterRepeatedResume, beforeResume);
+  assert.equal(afterReplay.status, "COMPLETED");
+  assert.equal(afterReplay.completedAt?.getTime(), beforeReplay.completedAt?.getTime());
+  assert.deepEqual(afterReplay.lines.map(({ id, status, stage, productId, variantId, inventoryItemId }) => ({ id, status, stage, productId, variantId, inventoryItemId })),
+    beforeReplay.lines.map(({ id, status, stage, productId, variantId, inventoryItemId }) => ({ id, status, stage, productId, variantId, inventoryItemId })));
+  assert.equal(afterReplay.activityLogs.filter(({ eventType }) => eventType === "IMPORT_RESULT").length,
+    beforeReplay.activityLogs.filter(({ eventType }) => eventType === "IMPORT_RESULT").length);
+  assert.equal(afterReplay.activityLogs.filter(({ eventType }) => eventType === "IMPORT_LINE_RESULT").length,
+    beforeReplay.activityLogs.filter(({ eventType }) => eventType === "IMPORT_LINE_RESULT").length);
+  assert.equal(afterReplay.activityLogs.filter(({ eventType, outcome }) => eventType === "IMPORT_RESUME" && outcome === "SUCCEEDED").length,
+    beforeReplay.activityLogs.filter(({ eventType, outcome }) => eventType === "IMPORT_RESUME" && outcome === "SUCCEEDED").length + 2);
 });
 
 test("actual Import History action rejects unconfirmed and cross-tenant Merge POSTs", { skip: !databaseUrl }, async (t) => {

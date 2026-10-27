@@ -1,0 +1,14 @@
+{
+  "counts": [
+    "1\nReady rows",
+    "1\nWarning rows",
+    "1\nError rows"
+  ],
+  "rows": [
+    "Row 2 · WARNING",
+    "Row 3 · ERROR",
+    "Row 4 · READY"
+  ],
+  "pageWidth": 1265,
+  "viewport": 1280
+}

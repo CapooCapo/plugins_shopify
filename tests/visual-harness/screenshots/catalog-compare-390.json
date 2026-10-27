@@ -1,0 +1,11 @@
+{
+  "cards": [
+    "áo khoác mùa đông\nSKIP · Review required · Quality: WARNING\n\nGroup is not confirmed; confirm it before it can be eligible.",
+    "túi vải canvas\nCREATE · Review required · Quality: READY\n\nFixture: no exact SKU match. Candidate only; future execution must recheck Shopify state.\n\nNo matching Shopify SKU was found. Creation is a proposal only; a future execution must recheck Shopify.\n\nLocal review decision: No decision. This choice is in-memory only, does not persist, and does not enable execution.\n\nAccept proposal for review Skip proposal",
+    "váy linen dài\nSKIP · Review required · Quality: ERROR\n\nGroup is not confirmed; confirm it before it can be eligible."
+  ],
+  "pageWidth": 390,
+  "viewport": 390,
+  "mutationCalls": 0,
+  "regions": []
+}

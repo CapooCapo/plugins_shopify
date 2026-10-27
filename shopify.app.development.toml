@@ -1,0 +1,15 @@
+# PROPOSAL ONLY — not runnable until a separate development-app client ID and
+# the Shopify CLI tunnel URL are supplied. Do not replace the production config.
+client_id = "<SEPARATE_DEVELOPMENT_APP_CLIENT_ID>"
+name = "stockhub-development"
+application_url = "https://<SHOPIFY_CLI_TUNNEL_HOST>"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+
+[access_scopes]
+scopes = "read_products"
+
+[auth]
+redirect_urls = ["https://<SHOPIFY_CLI_TUNNEL_HOST>/auth/callback"]

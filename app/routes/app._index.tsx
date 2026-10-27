@@ -20,6 +20,7 @@ export type RecentImport = {
   receiptCode: string;
   locationName: string;
   createdAt: Date;
+  updatedAt?: Date;
   status: string;
 };
 
@@ -27,6 +28,7 @@ export type ImportOverview = {
   batchCount: number;
   attentionBatchCount: number;
   recent: RecentImport[];
+  attention: RecentImport[];
 };
 
 type ImportBatchStatusCount = { status: string; _count: { _all: number } };
@@ -37,7 +39,7 @@ export function summarizeImportBatchStatusCounts(groups: ImportBatchStatusCount[
       batchCount: counts.batchCount + group._count._all,
       attentionBatchCount:
         counts.attentionBatchCount +
-        (group.status === "FAILED" || group.status === "UNCERTAIN" ? group._count._all : 0),
+        (["FAILED", "UNCERTAIN", "PARTIAL"].includes(group.status) ? group._count._all : 0),
     }),
     { batchCount: 0, attentionBatchCount: 0 },
   );
@@ -63,9 +65,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         status: true,
       },
     }),
-  ]).then(([statusCounts, recent]) => ({
+    prisma.importBatch.findMany({
+      where: { shop: session.shop, status: { in: ["FAILED", "UNCERTAIN", "PARTIAL"] } },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: 5,
+      select: { id: true, receiptCode: true, locationName: true, createdAt: true, updatedAt: true, status: true },
+    }),
+  ]).then(([statusCounts, recent, attention]) => ({
     ...summarizeImportBatchStatusCounts(statusCounts),
     recent,
+    attention,
   })).catch(() => null);
 
   try {

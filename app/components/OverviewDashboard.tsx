@@ -61,10 +61,28 @@ export function OverviewDashboard({ data, error, imports, loading = false }: Pro
 
     {error ? <s-banner tone="critical">{error}</s-banner> : null}
 
+    <section className="stockhub-overview-section stockhub-overview-attention" aria-labelledby="overview-attention-title">
+      <div className="stockhub-overview-section-heading">
+        <div><h2 id="overview-attention-title">Needs attention</h2><p>{imports ? `${imports.attentionBatchCount} failed, uncertain or partial imports` : "Import status unavailable"}</p></div>
+        <Link to="/app/imports/history">Open import history <span aria-hidden="true">→</span></Link>
+      </div>
+      {!imports ? <p className="stockhub-overview-message">Import attention could not be loaded.</p>
+        : imports.attention.length ? <div className="stockhub-overview-table-wrap"><table className="stockhub-overview-table">
+          <thead><tr><th scope="col">Receipt</th><th scope="col">Location</th><th scope="col">Updated</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead>
+          <tbody>{imports.attention.map((batch) => <tr key={batch.id}>
+            <td data-label="Receipt">{batch.receiptCode.trim() || "Receipt unavailable"}</td>
+            <td data-label="Location">{batch.locationName}</td>
+            <td data-label="Updated">{formatStockhubDateTime(batch.updatedAt ?? batch.createdAt)}</td>
+            <td data-label="Status"><span className={`stockhub-status ${statusClass(batch.status)}`}>{statusLabel(batch.status)}</span></td>
+            <td data-label="Action"><Link to={`/app/imports/history/${encodeURIComponent(batch.id)}`}>Review import</Link></td>
+          </tr>)}</tbody>
+        </table></div> : <p className="stockhub-overview-message">No imports currently need attention.</p>}
+    </section>
+
     <section className="stockhub-overview-section" aria-labelledby="overview-glance-title">
       <div className="stockhub-overview-section-heading">
         <h2 id="overview-glance-title">At a glance</h2>
-        <span>Live shop and receipt data</span>
+        <span>Live shop and import data</span>
       </div>
       <div className="stockhub-overview-metrics">
         <article className="stockhub-overview-metric stockhub-overview-metric--products">
@@ -80,7 +98,7 @@ export function OverviewDashboard({ data, error, imports, loading = false }: Pro
         <article className="stockhub-overview-metric stockhub-overview-metric--attention">
           <span className="stockhub-metric-label">Needs attention</span>
           <strong className="stockhub-metric-value">{imports ? imports.attentionBatchCount : "—"}</strong>
-          <span className="stockhub-metric-note">Failed or uncertain imports</span>
+          <span className="stockhub-metric-note">Failed, uncertain or partial imports</span>
         </article>
       </div>
     </section>
@@ -94,7 +112,7 @@ export function OverviewDashboard({ data, error, imports, loading = false }: Pro
 
     <section className="stockhub-overview-section stockhub-overview-recent" aria-labelledby="overview-recent-title">
       <div className="stockhub-overview-section-heading">
-        <div><h2 id="overview-recent-title">Recent imports</h2><p>Your five latest receipts</p></div>
+        <div><h2 id="overview-recent-title">Recent imports</h2><p>Your five latest import receipts</p></div>
         <Link to="/app/imports/history">View all history <span aria-hidden="true">→</span></Link>
       </div>
       {!imports ? <p className="stockhub-overview-message">Import activity is currently unavailable. Recent imports could not be loaded.</p>

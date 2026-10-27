@@ -169,7 +169,7 @@ export function ProductsCatalog({
           <div><h2 id="stockhub-products-results-title">Catalog results</h2><p>Showing up to {pageSize} results per page</p></div>
           <span>Inventory is product total across locations</span>
         </div>
-        <table className="stockhub-products-table">
+        <div className="stockhub-products-table-wrap"><table className="stockhub-products-table">
           <thead><tr><th scope="col">Product</th><th scope="col">SKU / variants</th><th scope="col">Status</th><th scope="col">Price</th><th scope="col">Total inventory</th><th scope="col">Actions</th></tr></thead>
           <tbody>{products.map((product, index) => {
             const variant = product.variants.edges[0]?.node;
@@ -208,7 +208,7 @@ export function ProductsCatalog({
               </td></tr> : null}
             </Fragment>;
           })}</tbody>
-        </table>
+        </table></div>
       </section>}
 
     {!error && (pageInfo.hasPreviousPage || pageInfo.hasNextPage) ? <nav className="stockhub-products-pagination" aria-label="Product catalog pagination">

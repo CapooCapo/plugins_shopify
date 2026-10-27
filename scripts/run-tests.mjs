@@ -8,11 +8,37 @@ const sourceSchemaPath = resolve(root, "prisma/schema.prisma");
 const testSchemaPath = resolve(root, "prisma/.schema.test.prisma");
 const prismaCli = resolve(root, "node_modules/.bin/prisma");
 
+function rewriteModelNativeTypes(schema, modelName, replacements) {
+  const modelPattern = new RegExp(`(model ${modelName} \\{[\\s\\S]*?\\n\\})`);
+  const match = schema.match(modelPattern);
+  if (!match) throw new Error(`Could not find ${modelName} in the test schema source`);
+  let model = match[1];
+  for (const [from, to, expected] of replacements) {
+    const count = model.split(from).length - 1;
+    if (count !== expected) throw new Error(`Expected ${expected} ${from} annotation(s) in ${modelName}, found ${count}`);
+    model = model.replaceAll(from, to);
+  }
+  return schema.replace(match[1], model);
+}
+
 const sourceSchema = await readFile(sourceSchemaPath, "utf8");
-const testSchema = sourceSchema
+let testSchema = sourceSchema
   .replace('provider = "prisma-client-js"', 'provider = "prisma-client-js"\n  output   = "../node_modules/.prisma/stockhub-test-client"')
   .replace('provider = "postgresql"', 'provider = "sqlite"')
   .replace('url      = env("DATABASE_URL")', 'url      = "file:dev.sqlite"');
+
+// SQLite does not support the catalog models' PostgreSQL native annotations.
+// Remove them only from the derived test schema; keep prisma/schema.prisma intact.
+testSchema = rewriteModelNativeTypes(testSchema, "CatalogImportBatch", [["@db.Text", "", 1]]);
+testSchema = rewriteModelNativeTypes(testSchema, "CatalogImportLine", [["@db.Decimal(20, 6)", "", 1], ["@db.Text", "", 1]]);
+testSchema = rewriteModelNativeTypes(testSchema, "CatalogImportGroup", [["@db.Text", "", 1]]);
+
+for (const modelName of ["CatalogImportBatch", "CatalogImportLine", "CatalogImportGroup"]) {
+  const modelPattern = new RegExp(`(model ${modelName} \\{[\\s\\S]*?\\n\\})`);
+  const model = testSchema.match(modelPattern)?.[1];
+  if (!model) throw new Error(`Could not find ${modelName} in the derived SQLite test schema`);
+  if (/@db\./.test(model)) throw new Error(`Native Prisma annotations remain in derived SQLite model ${modelName}`);
+}
 
 if (testSchema === sourceSchema || !testSchema.includes('provider = "sqlite"')) {
   throw new Error("Could not derive the isolated SQLite test schema from prisma/schema.prisma");

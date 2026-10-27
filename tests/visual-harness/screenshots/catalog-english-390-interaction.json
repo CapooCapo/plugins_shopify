@@ -1,0 +1,22 @@
+{
+  "suggested": [
+    "productName",
+    "sku",
+    "price",
+    "description",
+    "size",
+    "color",
+    "vendor",
+    ""
+  ],
+  "labels": [
+    "Product Name",
+    "SKU",
+    "Price",
+    "Description",
+    "Size",
+    "Color",
+    "Vendor"
+  ],
+  "quantityIgnored": true
+}

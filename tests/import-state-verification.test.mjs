@@ -262,7 +262,7 @@ test("each history receipt renders one verification action and verification resu
     "selected receipt detail must provide exactly one Verify action");
 
   const reportStart = source.indexOf("{actionData?.verification ?");
-  const reportEnd = source.indexOf("{batch.lines.length ?", reportStart);
+  const reportEnd = source.indexOf("{batch.lines.length || draftEditable ?", reportStart);
   assert.ok(reportStart >= 0 && reportEnd > reportStart, "the route must render verification report output");
   const report = source.slice(reportStart, reportEnd);
   assert.match(report, /counts\.SAFE_CANDIDATE/);

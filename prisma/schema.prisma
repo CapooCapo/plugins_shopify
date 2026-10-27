@@ -331,3 +331,77 @@ model ShipmentEvent {
 
   @@index([shop, shipmentId, createdAt])
 }
+
+model CatalogImportBatch {
+  id            String              @id
+  shop          String
+  submissionId  String?
+  fileName      String
+  fileChecksum  String
+  originalCsv   String              @db.Text
+  sourceHeaders Json
+  mapping       Json?
+  status        String              @default("MAPPING")
+  draftVersion  Int                 @default(0)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  lines         CatalogImportLine[]
+  groups        CatalogImportGroup[]
+
+  @@unique([shop, id])
+  @@unique([shop, submissionId])
+  @@index([shop, createdAt])
+  @@index([shop, status, updatedAt])
+}
+
+model CatalogImportLine {
+  id                 String             @id
+  shop               String
+  batchId            String
+  rowNumber          Int
+  sourceRowNumber    Int?
+  sourceValues       Json
+  productName        String?
+  sku                String?
+  price              Decimal?           @db.Decimal(20, 6)
+  priceZeroConfirmed Boolean            @default(false)
+  description        String?            @db.Text
+  productGroupCode   String?
+  size               String?
+  color              String?
+  vendor             String?
+  productType        String?
+  imageUrl           String?
+  groupId            String?
+  status             String             @default("ERROR")
+  errors             Json
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  batch              CatalogImportBatch @relation(fields: [shop, batchId], references: [shop, id], onDelete: Cascade)
+  group              CatalogImportGroup? @relation(fields: [shop, batchId, groupId], references: [shop, batchId, id], onDelete: NoAction)
+
+  @@unique([shop, id])
+  @@unique([batchId, rowNumber])
+  @@index([shop, batchId, status, rowNumber])
+  @@index([shop, batchId, groupId])
+}
+
+model CatalogImportGroup {
+  id              String             @id
+  shop            String
+  batchId         String
+  source          String
+  groupingKey     String
+  reason          String             @db.Text
+  selections      Json
+  validation      Json
+  confirmedAt     DateTime?
+  state           String             @default("ACTIVE")
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  batch           CatalogImportBatch @relation(fields: [shop, batchId], references: [shop, id], onDelete: Cascade)
+  lines           CatalogImportLine[]
+
+  @@unique([shop, batchId, id])
+  @@index([shop, batchId, state, createdAt])
+}

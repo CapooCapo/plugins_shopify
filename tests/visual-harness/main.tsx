@@ -20,17 +20,31 @@ const imports = {
     { id: "fixture-2", receiptCode: "IMP-00213", locationName: "East branch", createdAt: new Date("2026-10-21T07:00:00Z"), status: "UNCERTAIN" },
     { id: "fixture-3", receiptCode: "IMP-00212", locationName: "Main warehouse", createdAt: new Date("2026-10-20T07:00:00Z"), status: "FAILED" },
   ],
+  attention: [
+    { id: "fixture-2", receiptCode: "IMP-00213", locationName: "East branch", createdAt: new Date("2026-10-21T07:00:00Z"), updatedAt: new Date("2026-10-22T07:00:00Z"), status: "UNCERTAIN" },
+    { id: "fixture-3", receiptCode: "IMP-00212", locationName: "Main warehouse", createdAt: new Date("2026-10-20T07:00:00Z"), updatedAt: new Date("2026-10-20T07:00:00Z"), status: "FAILED" },
+  ],
 };
 
 import NewImport from "../../app/routes/app.imports._index";
+import CatalogImports from "../../app/routes/app.imports.catalog._index";
+import CatalogImportDetail from "../../app/routes/app.imports.catalog.$batchId";
 import { ImportDirtyContext } from "../../app/import-dirty-context";
 import { newImportFixture } from "./new-import-fixture";
 import { ReceiptActionsFixture, receiptActionsFixtureAction } from "./ReceiptActionsFixture";
+import { catalogDetailAction, catalogDetailLoader, catalogListAction, catalogListLoader, hydrateCatalogFixtures, resetCatalogFixtures } from "./catalog-fixture";
 
 const selectedPage = new URLSearchParams(location.search).get("page") ?? "overview";
 const skuMode = new URLSearchParams(location.search).get("mode") === "sku";
 
-const initialPath = selectedPage === "products" ? "/app/products" : selectedPage === "new-import" ? "/app/imports" : selectedPage === "receipt-actions" ? "/app/receipt-actions" : "/app";
+if (selectedPage === "catalog" && new URLSearchParams(location.search).get("resetCatalog") === "1") {
+  resetCatalogFixtures();
+  history.replaceState(null, "", "/?page=catalog");
+} else if (selectedPage === "catalog") {
+  hydrateCatalogFixtures();
+}
+const catalogBatchId = new URLSearchParams(location.search).get("batchId");
+const initialPath = selectedPage === "products" ? "/app/products" : selectedPage === "new-import" ? "/app/imports" : selectedPage === "receipt-actions" ? "/app/receipt-actions" : selectedPage === "catalog" ? catalogBatchId ? `/app/imports/catalog/${encodeURIComponent(catalogBatchId)}` : "/app/imports/catalog" : "/app";
 
 const router = createMemoryRouter([
   {
@@ -78,7 +92,22 @@ const router = createMemoryRouter([
     element: <s-page inlineSize="large"><ReceiptActionsFixture /></s-page>,
     action: receiptActionsFixtureAction,
   },
+  {
+    path: "/app/imports/catalog",
+    element: <s-page heading="Product Catalog CSV" inlineSize="large"><CatalogImports /></s-page>,
+    loader: catalogListLoader,
+    action: catalogListAction,
+  },
+  {
+    path: "/app/imports/catalog/:batchId",
+    element: <s-page heading="Product Catalog Draft" inlineSize="large"><CatalogImportDetail /></s-page>,
+    loader: catalogDetailLoader,
+    action: catalogDetailAction,
+  },
 ], { initialEntries: [initialPath] });
+
+Object.assign(window, { __memoryPath: router.state.location.pathname, __memorySearch: router.state.location.search, __shopifyMutationCalls: 0 });
+router.subscribe((state) => Object.assign(window, { __memoryPath: state.location.pathname, __memorySearch: state.location.search }));
 
 createRoot(document.getElementById("root")!).render(<RouterProvider router={router} />);
 
@@ -141,6 +170,27 @@ function measure() {
       validateButton: !!document.querySelector('s-button[type="submit"]'),
       guidanceCard: box(".stockhub-guidance-card"),
     } : null,
+    catalog: selectedPage === "catalog" ? {
+      route: (window as Window & { __memoryPath?: string }).__memoryPath ?? location.pathname,
+      pageWidth: document.documentElement.scrollWidth,
+      tableRegions: [...document.querySelectorAll<HTMLElement>(".stockhub-catalog-table-wrap")].map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { label: element.getAttribute("aria-label"), tabIndex: element.tabIndex,
+          width: Math.round(rect.width), right: Math.round(rect.right), clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth, tableWidth: element.querySelector("table")?.getBoundingClientRect().width ?? 0 };
+      }),
+      fieldCount: document.querySelectorAll(".stockhub-catalog-field input").length,
+      fieldRects: [...document.querySelectorAll<HTMLElement>(".stockhub-catalog-field")].map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), right: Math.round(rect.right) };
+      }),
+      rowCardCount: document.querySelectorAll(".stockhub-catalog-row-card").length,
+      rowStatuses: [...document.querySelectorAll(".stockhub-catalog-row-card > p strong")].map((element) => element.textContent?.trim()),
+      zeroConfirmationCount: document.querySelectorAll('.stockhub-catalog-confirm-zero input[type="checkbox"]').length,
+      fileInput: !!document.getElementById("catalog-file"),
+      previewButton: !!document.querySelector('button[value="preview-mapping"]'),
+      shopifyMutationCalls: (window as Window & { __shopifyMutationCalls?: number }).__shopifyMutationCalls ?? 0,
+    } : null,
     receiptActions: selectedPage === "receipt-actions" ? (() => {
       const host = document.querySelector<HTMLElement>(".stockhub-merge-action s-button");
       const innerButton = host?.shadowRoot?.querySelector<HTMLButtonElement>("button");
@@ -196,4 +246,5 @@ function measure() {
   document.body.dataset.visualReady = "true";
 }
 
+Object.assign(window, { __refreshVisualMetrics: measure });
 setTimeout(measure, 2500);

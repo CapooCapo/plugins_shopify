@@ -841,6 +841,21 @@ test("pre-blocked invalid rows never reach Shopify mutations", async () => {
   assert.equal(calls.some((call) => call.operationName !== "StockHubValidateLocation"), false);
 });
 
+test("explicit partial merge processes eligible rows while retaining blocked rows", async () => {
+  const ready = makeLine({ id: "line-ready", sku: "SKU-1" });
+  const blocked = makeLine({ id: "line-blocked", rowNumber: 3, sku: "BAD-SKU", operationType: "BLOCKED", status: "BLOCKED", errorCode: "CSV_INVALID_ROW" });
+  const batch = makeBatch({ lines: [ready, blocked] });
+  const { prisma, state } = makePrisma({ batch });
+  const { admin, calls } = makeAdmin({ skuResults: [existingVariant()] });
+
+  const result = await run(batch, admin, prisma);
+
+  assert.equal(result.status, "PARTIAL");
+  assert.equal(state.lines.find((line) => line.id === "line-ready").status, "SUCCEEDED");
+  assert.equal(state.lines.find((line) => line.id === "line-blocked").status, "BLOCKED");
+  assert.equal(calls.some((call) => call.operationName === "StockHubAdjustIncoming"), true);
+});
+
 test("batch status reflects verified 10/10, 0/10, and 7/10 line outcomes", async (t) => {
   for (const { label, successes, expectedBatchStatus, expectedLineStatus } of [
     { label: "10 of 10 succeed", successes: 10, expectedBatchStatus: "COMPLETED", expectedLineStatus: "SUCCEEDED" },
