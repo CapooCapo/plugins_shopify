@@ -13,6 +13,8 @@ export type PersistImportPreviewInput = {
   location: { id: string; name: string };
   currencyCode: string;
   lines: Prisma.ImportLineCreateWithoutBatchInput[];
+  /** A merchant has explicitly confirmed that this is a new stock receipt. */
+  duplicateConfirmed?: boolean;
 };
 
 export type PersistImportPreviewResult = {
@@ -21,10 +23,30 @@ export type PersistImportPreviewResult = {
   duplicateCsv: boolean;
 };
 
+export type DuplicateImportPreview = {
+  batchId: string;
+  receiptCode: string;
+  status: string;
+  locationName: string;
+  createdAt: Date;
+};
+
 export class ImportSubmissionConflictError extends Error {
   constructor() {
     super("This upload form was already used for a different CSV or location. Reload Imports and submit the file again.");
     this.name = "ImportSubmissionConflictError";
+  }
+}
+
+/**
+ * Raised before a second receipt is created for the same shop-scoped file
+ * bytes. Callers can render a link to the original receipt without exposing
+ * its underlying data to another shop.
+ */
+export class DuplicateImportPreviewError extends Error {
+  constructor(readonly duplicate: DuplicateImportPreview) {
+    super("This CSV has already been uploaded for this store.");
+    this.name = "DuplicateImportPreviewError";
   }
 }
 
@@ -50,54 +72,70 @@ function assertSameSubmission(
   return { batchId: existing.id, receiptCode: existing.receiptCode, duplicateCsv: false };
 }
 
-async function hasOtherMatchingCsv(
-  database: PrismaClient,
-  input: PersistImportPreviewInput,
-  batchId: string,
-) {
-  return Boolean(await database.importBatch.findFirst({
+function duplicateFromRecord(record: {
+  id: string;
+  receiptCode: string;
+  status: string;
+  locationName: string;
+  createdAt: Date;
+}): DuplicateImportPreview {
+  return {
+    batchId: record.id,
+    receiptCode: record.receiptCode,
+    status: record.status,
+    locationName: record.locationName,
+    createdAt: record.createdAt,
+  };
+}
+
+export async function findDuplicateImportPreview(
+  shop: string,
+  checksum: string,
+  database: PrismaClient = prisma,
+): Promise<DuplicateImportPreview | null> {
+  const duplicate = await database.importBatch.findFirst({
     where: {
-      shop: input.shop,
-      fileChecksum: input.checksum,
-      id: { not: batchId },
+      shop,
+      fileChecksum: checksum,
     },
-    select: { id: true },
-  }));
+    select: { id: true, receiptCode: true, status: true, locationName: true, createdAt: true },
+  });
+  return duplicate ? duplicateFromRecord(duplicate) : null;
+}
+
+function isSerializationConflict(error: unknown): error is { code: "P2034" } {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "P2034";
 }
 
 /**
- * Persist a preview exactly once per server-issued form token. Distinct tokens
- * always create distinct receipts, even when the CSV checksum is identical.
+ * Persist a preview exactly once per server-issued form token. A second token
+ * with identical original CSV bytes is rejected unless the merchant explicitly
+ * confirms it as a separate receipt. The serializable transaction makes the
+ * duplicate check and receipt creation one atomic decision.
  */
 export async function persistImportPreview(
   input: PersistImportPreviewInput,
   database: PrismaClient = prisma,
 ): Promise<PersistImportPreviewResult> {
-  try {
-    return await database.$transaction(async (transaction) => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await database.$transaction(async (transaction) => {
       const existing = await transaction.importBatch.findUnique({
         where: { shop_submissionId: { shop: input.shop, submissionId: input.submissionId } },
         select: { id: true, receiptCode: true, fileChecksum: true, locationId: true },
       });
       if (existing) {
         const result = assertSameSubmission(existing, input);
-        return {
-          ...result,
-          duplicateCsv: Boolean(await transaction.importBatch.findFirst({
-            where: {
-              shop: input.shop,
-              fileChecksum: input.checksum,
-              id: { not: existing.id },
-            },
-            select: { id: true },
-          })),
-        };
+        return result;
       }
 
-      const duplicateCsv = Boolean(await transaction.importBatch.findFirst({
+      const duplicate = await transaction.importBatch.findFirst({
         where: { shop: input.shop, fileChecksum: input.checksum },
-        select: { id: true },
-      }));
+        select: { id: true, receiptCode: true, status: true, locationName: true, createdAt: true },
+      });
+      if (duplicate && !input.duplicateConfirmed) {
+        throw new DuplicateImportPreviewError(duplicateFromRecord(duplicate));
+      }
       const dateKey = receiptDateKey();
       const counter = await transaction.importReceiptCounter.upsert({
         where: { shop_dateKey: { shop: input.shop, dateKey } },
@@ -143,23 +181,22 @@ export async function persistImportPreview(
           }),
         });
       }
-      return { batchId: batch.id, receiptCode: batch.receiptCode, duplicateCsv };
-    });
-  } catch (error) {
-    if (!isUniqueConstraintError(error)) throw error;
+      return { batchId: batch.id, receiptCode: batch.receiptCode, duplicateCsv: Boolean(duplicate) };
+      }, { isolationLevel: "Serializable" as Prisma.TransactionIsolationLevel });
+    } catch (error) {
+      if (isSerializationConflict(error) && attempt < 2) continue;
+      if (!isUniqueConstraintError(error)) throw error;
 
-    // A concurrent request can pass the first token lookup before either
-    // transaction commits. The unique token index chooses the winner; return
-    // it only when its payload agrees with this request.
-    const winner = await database.importBatch.findUnique({
-      where: { shop_submissionId: { shop: input.shop, submissionId: input.submissionId } },
-      select: { id: true, receiptCode: true, fileChecksum: true, locationId: true },
-    });
-    if (!winner) throw error;
-    const result = assertSameSubmission(winner, input);
-    return {
-      ...result,
-      duplicateCsv: await hasOtherMatchingCsv(database, input, winner.id),
-    };
+      // A concurrent request can pass the first token lookup before either
+      // transaction commits. The unique token index chooses the winner; return
+      // it only when its payload agrees with this request.
+      const winner = await database.importBatch.findUnique({
+        where: { shop_submissionId: { shop: input.shop, submissionId: input.submissionId } },
+        select: { id: true, receiptCode: true, fileChecksum: true, locationId: true },
+      });
+      if (!winner) throw error;
+      return assertSameSubmission(winner, input);
+    }
   }
+  throw new Error("Could not persist the import preview after retrying a concurrent transaction.");
 }

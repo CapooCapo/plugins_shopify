@@ -78,8 +78,10 @@ function statusIcon(status: string) {
   return "info";
 }
 
-function isCsvValidationError(errorCode: string | null) {
-  return errorCode === "CSV_INVALID_ROW" || errorCode === "NEW_PRODUCT_FIELDS_MISSING";
+function validationGroup(line: { status: string; operationType: string; errorCode: string | null; errorDetail: string | null }) {
+  if (line.status === "PREVIEWED" && line.operationType !== "BLOCKED") return "READY";
+  if (line.status === "BLOCKED" && (line.errorCode === "NEW_PRODUCT_FIELDS_MISSING" || /missing|required/i.test(line.errorDetail ?? ""))) return "MISSING";
+  return "ERROR";
 }
 
 function correctionHint(errorCode: string | null) {
@@ -112,25 +114,28 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
   const [linePage, setLinePage] = useState(0);
   const [linePageSize, setLinePageSize] = useState(25);
   const [sortAscending, setSortAscending] = useState(true);
+  const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
+  const [inspectorMode, setInspectorMode] = useState<"details" | "edit" | "add" | "delete">("details");
+  const [mergeConfirming, setMergeConfirming] = useState(false);
+  const inspectorHeadingRef = useRef<HTMLHeadingElement>(null);
   const draftEditable = batch.status === "PREVIEWED" && batch.lines.every((line) => line.stage === "PREPARED" && ["PREVIEWED", "BLOCKED"].includes(line.status));
-  const readyCount = batch.lines.filter((line) => line.status === "PREVIEWED" && line.operationType !== "BLOCKED").length;
-  const warningCount = batch.lines.filter((line) => line.status === "BLOCKED" && !isCsvValidationError(line.errorCode)).length;
-  const errorCount = batch.lines.filter((line) => line.status === "BLOCKED" && isCsvValidationError(line.errorCode)).length;
+  const readyCount = batch.lines.filter((line) => validationGroup(line) === "READY").length;
+  const missingCount = batch.lines.filter((line) => validationGroup(line) === "MISSING").length;
+  const errorCount = batch.lines.filter((line) => validationGroup(line) === "ERROR").length;
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const verificationCopyRef = useRef<HTMLTextAreaElement>(null);
   const manualIdCopyRef = useRef<HTMLTextAreaElement>(null);
-  const [idCopyFeedback, setIdCopyFeedback] = useState<{
-    lineId: string;
-    label: string;
-    status: "copied" | "failed";
-  } | null>(null);
+  const [idCopyFeedback, setIdCopyFeedback] = useState<{ label: string; status: "copied" | "failed" } | null>(null);
   useEffect(() => {
     if (copyError) {
       verificationCopyRef.current?.focus();
       verificationCopyRef.current?.select();
     }
   }, [copyError]);
+  useEffect(() => {
+    if (selectedLineId || inspectorMode === "add") inspectorHeadingRef.current?.focus();
+  }, [selectedLineId, inspectorMode]);
   useEffect(() => {
     if (idCopyFeedback?.status === "failed") {
       manualIdCopyRef.current?.focus();
@@ -179,12 +184,10 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
     return batch.lines.filter((line) => {
       const matchesSearch = !query || [line.sku, line.title, line.matchedProductTitle, line.matchedVariantTitle]
         .some((value) => value?.toLowerCase().includes(query));
-      const matchesStatus = ["ALL", "READY", "WARNING", "ERROR"].includes(lineStatusFilter) || line.status === lineStatusFilter;
+      const matchesStatus = ["ALL", "READY", "MISSING", "ERROR"].includes(lineStatusFilter) || line.status === lineStatusFilter;
       const matchesType = lineTypeFilter === "ALL" || line.operationType === lineTypeFilter;
-      const matchesValidation = lineStatusFilter === "READY" ? line.status === "PREVIEWED" && line.operationType !== "BLOCKED"
-        : lineStatusFilter === "WARNING" ? line.status === "BLOCKED" && !isCsvValidationError(line.errorCode)
-          : lineStatusFilter === "ERROR" ? line.status === "BLOCKED" && isCsvValidationError(line.errorCode)
-            : true;
+      const matchesValidation = ["READY", "MISSING", "ERROR"].includes(lineStatusFilter)
+        ? validationGroup(line) === lineStatusFilter : true;
       return matchesSearch && matchesStatus && matchesValidation && matchesType;
     }).sort((left, right) => sortAscending ? left.rowNumber - right.rowNumber : right.rowNumber - left.rowNumber);
   }, [batch.lines, lineSearch, lineStatusFilter, lineTypeFilter, sortAscending]);
@@ -210,6 +213,23 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
       : !hasMergeable
           ? "There are no eligible lines left to merge or resume."
           : null;
+  const selectedLine = batch.lines.find((line) => line.id === selectedLineId) ?? null;
+  const executionStarted = batch.status !== "PREVIEWED" || batch.lines.some((line) => line.stage !== "PREPARED" || line.status === "SUCCEEDED");
+  const eligibleCount = batch.lines.filter((line) => !["SUCCEEDED", "BLOCKED"].includes(line.status) && line.operationType !== "BLOCKED").length;
+  const openInspector = (lineId: string, mode: "details" | "edit" = "details") => {
+    setSelectedLineId(lineId);
+    setInspectorMode(mode);
+  };
+  const copyIdentifier = async (label: string, value: string | null) => {
+    setIdCopyFeedback(null);
+    try {
+      if (!value || !navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(value);
+      setIdCopyFeedback({ label, status: "copied" });
+    } catch {
+      setIdCopyFeedback({ label, status: "failed" });
+    }
+  };
 
   return (
     <div className="stockhub-receipt-card"><s-section>
@@ -224,14 +244,14 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
       {batch.status === "PREVIEWED" ? <s-banner tone="info">Draft — not sent to Shopify. Editing validates the row and reads current SKU/location data only; Shopify changes happen only after an explicit merge confirmation.</s-banner> : null}
       {draftNotice ? <div role="status" aria-live="polite">Draft row {draftNotice}.</div> : null}
       <div className="stockhub-draft-status-summary" role="group" aria-label="Draft validation summary">
-        <button type="button" onClick={() => setLineStatusFilter("READY")}><strong>{readyCount}</strong><span>Ready</span></button>
-        <button type="button" onClick={() => setLineStatusFilter("WARNING")}><strong>{warningCount}</strong><span>Warning</span></button>
-        <button type="button" onClick={() => setLineStatusFilter("ERROR")}><strong>{errorCount}</strong><span>Error</span></button>
+        <button type="button" aria-pressed={lineStatusFilter === "READY"} onClick={() => { setLineStatusFilter((value) => value === "READY" ? "ALL" : "READY"); setLinePage(0); }}><strong>{readyCount}</strong><span>Ready to Merge</span></button>
+        <button type="button" aria-pressed={lineStatusFilter === "MISSING"} onClick={() => { setLineStatusFilter((value) => value === "MISSING" ? "ALL" : "MISSING"); setLinePage(0); }}><strong>{missingCount}</strong><span>Missing Information</span></button>
+        <button type="button" aria-pressed={lineStatusFilter === "ERROR"} onClick={() => { setLineStatusFilter((value) => value === "ERROR" ? "ALL" : "ERROR"); setLinePage(0); }}><strong>{errorCount}</strong><span>Error</span></button>
       </div>
       <s-grid gridTemplateColumns="repeat(auto-fit, minmax(160px, 1fr))" gap="base">
         <s-text>Total rows: {totalLines}</s-text>
       </s-grid>
-      <div className="stockhub-receipt-progress" role="group" aria-label="Import line completion">
+      {executionStarted ? <><div className="stockhub-receipt-progress" role="group" aria-label="Import line completion">
         <div className="stockhub-receipt-progress-label">
           <strong>Import progress</strong>
           <span>{successful} of {totalLines} lines completed · {completionPercent}%</span>
@@ -254,7 +274,7 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
         </table>
       </div>
       <s-paragraph>Product creation and inventory activation are separate stages; a created Draft product does not mean its import line or inventory step completed. Counts use persisted confirmed stage data only.</s-paragraph>
-      {createdDraftInventoryFailures > 0 ? <s-banner tone="warning">Products were created, but inventory activation failed for {createdDraftInventoryFailures} Draft product{createdDraftInventoryFailures === 1 ? "" : "s"}. The saved receipt status has not been changed.</s-banner> : null}
+      {createdDraftInventoryFailures > 0 ? <s-banner tone="warning">Products were created, but inventory activation failed for {createdDraftInventoryFailures} Draft product{createdDraftInventoryFailures === 1 ? "" : "s"}. The saved receipt status has not been changed.</s-banner> : null}</> : null}
       {actionData?.error ? <s-banner tone="critical">{actionData.error}</s-banner> : null}
       {actionData?.authorizationError ? <s-banner tone="critical">{actionData.authorizationError}</s-banner> : null}
       <div
@@ -303,19 +323,12 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
       {mergeDisabledReason ? <s-banner tone="warning">{mergeDisabledReason}</s-banner> : null}
       <s-heading>Line items</s-heading>
       {batch.lines.length || draftEditable ? <>
-        {draftEditable ? <details className="stockhub-draft-add"><summary>Add a draft row</summary><Form method="post" className="stockhub-draft-form">
-          <input type="hidden" name="intent" value="draftAddLine"/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="expectedUpdatedAt" value={batch.updatedAt.toISOString()}/>
-          <s-grid gridTemplateColumns="repeat(auto-fit, minmax(180px, 1fr))" gap="base">
-            <s-text-field label="SKU" name="sku" required/><label>Quantity<input name="quantity" type="number" min="1" required/></label>
-            <s-text-field label="Product title" name="title"/><label>Price<input name="price" type="number" min="0" step="0.01"/></label>
-            <s-text-field label="Description" name="description"/><label>Image URL<input name="image_url" type="url"/></label>
-          </s-grid><s-button type="submit" variant="primary">Add and validate row</s-button>
-        </Form></details> : null}
+        {draftEditable ? <div className="stockhub-draft-add"><s-button type="button" onClick={() => { setSelectedLineId(null); setInspectorMode("add"); }}>Add a draft row</s-button></div> : null}
         <s-grid gridTemplateColumns="repeat(auto-fit, minmax(180px, 1fr))" gap="base">
           <s-text-field label="Search line items" value={lineSearch} placeholder="Search SKU or product" onChange={(event) => { setLineSearch(event.currentTarget.value); setLinePage(0); }} />
           <s-select label="Line status" value={lineStatusFilter} onChange={(event) => { setLineStatusFilter(event.currentTarget.value); setLinePage(0); }}>
             <s-option value="ALL">All statuses</s-option>
-            <s-option value="READY">Ready</s-option><s-option value="WARNING">Warning</s-option><s-option value="ERROR">Error</s-option>
+            <s-option value="READY">Ready to Merge</s-option><s-option value="MISSING">Missing Information</s-option><s-option value="ERROR">Error</s-option>
             {(["PREVIEWED", "RUNNING", "SUCCEEDED", "FAILED", "BLOCKED", "UNCERTAIN"] as const).map((status) => <s-option key={status} value={status}>{statusLabel(status)}</s-option>)}
           </s-select>
           <s-select label="Operation type" value={lineTypeFilter} onChange={(event) => { setLineTypeFilter(event.currentTarget.value); setLinePage(0); }}>
@@ -326,117 +339,16 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
           </s-select>
           <s-button type="button" onClick={() => setSortAscending((ascending) => !ascending)}>Sort row number {sortAscending ? "↑" : "↓"}</s-button>
         </s-grid>
-        <div className="stockhub-merge-action">
-          <Form method="post" onSubmit={(event) => { if (!window.confirm(`Confirm ${batch.status === "PREVIEWED" ? "merge" : "resume"} of ${batch.lines.filter((line) => !["SUCCEEDED", "BLOCKED"].includes(line.status) && line.operationType !== "BLOCKED").length} eligible row(s) for receipt ${batch.receiptCode}? ${blocked > 0 ? `${blocked} blocked row(s) will remain in this receipt and will not be sent to Shopify.` : ""}`)) event.preventDefault(); }}><input type="hidden" name="intent" value={batch.status === "PREVIEWED" ? "merge" : "resume"}/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="confirmed" value="yes"/><input type="hidden" name="confirmedCount" value={batch.lines.filter((line) => !["SUCCEEDED", "BLOCKED"].includes(line.status) && line.operationType !== "BLOCKED").length}/>{blocked > 0 ? <input type="hidden" name="partialConfirmed" value="yes"/> : null}<s-button type="submit" variant="primary" disabled={mergeDisabled}>{batch.status === "PREVIEWED" ? "Merge" : "Resume"} eligible lines</s-button></Form>
+        <div className="stockhub-merge-action stockhub-merge-bar">
+          <div><strong>Eligible: {eligibleCount} rows</strong>{blocked > 0 ? <span> · Excluded: {blocked} blocked rows</span> : null}</div>
+          {!mergeConfirming ? <s-button type="button" variant="primary" disabled={mergeDisabled} onClick={() => setMergeConfirming(true)}>{batch.status === "PREVIEWED" ? "Merge" : "Resume"} eligible lines</s-button> : <div className="stockhub-merge-confirmation" role="dialog" aria-label="Confirm inventory merge"><s-paragraph>Confirm {batch.status === "PREVIEWED" ? "merge" : "resume"} of {eligibleCount} eligible row(s) for receipt {batch.receiptCode}. Shopify writes start only after this confirmation.{blocked > 0 ? ` ${blocked} blocked row(s) will remain attached to this receipt.` : ""}</s-paragraph><Form method="post"><input type="hidden" name="intent" value={batch.status === "PREVIEWED" ? "merge" : "resume"}/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="confirmed" value="yes"/><input type="hidden" name="confirmedCount" value={eligibleCount}/>{blocked > 0 ? <input type="hidden" name="partialConfirmed" value="yes"/> : null}<s-button type="submit" variant="primary">Confirm merge of {eligibleCount} rows</s-button><s-button type="button" onClick={() => setMergeConfirming(false)}>Cancel</s-button></Form></div>}
         </div>
         <s-text>{filteredLines.length} of {batch.lines.length} line items · Page {Math.min(linePage + 1, linePageCount)} of {linePageCount}</s-text>
         <s-table variant="auto">
         <s-table-header-row><s-table-header listSlot="primary" format="base">SKU</s-table-header><s-table-header listSlot="labeled" format="base">Product / variant</s-table-header><s-table-header listSlot="labeled" format="numeric">Quantity</s-table-header><s-table-header listSlot="labeled" format="base">Progress</s-table-header><s-table-header listSlot="labeled" format="base">Details / actions</s-table-header></s-table-header-row>
         <s-table-body>{visibleLines.map((line) => <s-table-row key={line.id}>
           <s-table-cell>{line.sku}</s-table-cell><s-table-cell><s-stack direction="block" gap="small"><s-text>{line.matchedProductTitle ?? line.title ?? "—"}</s-text>{line.matchedVariantTitle ? <s-text>{line.matchedVariantTitle}</s-text> : null}</s-stack></s-table-cell><s-table-cell>{line.quantity ?? "—"}</s-table-cell><s-table-cell><s-stack direction="block" gap="small"><s-badge tone={statusTone(line.status)} icon={statusIcon(line.status)}>{statusLabel(line.status)}</s-badge><s-text>{stageLabel(line.stage, line.status, line.errorCode)}</s-text></s-stack></s-table-cell>
-          <s-table-cell>
-            {line.status === "BLOCKED" ? <s-banner tone={isCsvValidationError(line.errorCode) ? "critical" : "warning"}>{isCsvValidationError(line.errorCode) ? "CSV validation" : "Shopify match validation"} · {line.errorDetail ?? line.errorCode}<s-paragraph>{correctionHint(line.errorCode)}</s-paragraph></s-banner> : null}
-            {["FAILED", "UNCERTAIN"].includes(line.status) ? <s-banner tone={line.status === "UNCERTAIN" ? "warning" : "critical"}>Shopify execution · {line.errorDetail ?? line.errorCode ?? stageLabel(line.stage, line.status, line.errorCode)}</s-banner> : null}
-            {line.errorDetail || line.errorCode ? <details>
-              <summary>Error details</summary>
-              <div style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>
-                <s-paragraph>{line.errorDetail ?? line.errorCode}</s-paragraph>
-              </div>
-            </details> : null}
-            {draftEditable && ["PREVIEWED", "BLOCKED"].includes(line.status) ? <details><summary>Edit draft row {line.rowNumber}</summary><Form method="post" className="stockhub-draft-form">
-              <input type="hidden" name="intent" value="draftEditLine"/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="lineId" value={line.id}/><input type="hidden" name="expectedUpdatedAt" value={batch.updatedAt.toISOString()}/>
-              <s-grid gridTemplateColumns="repeat(auto-fit, minmax(180px, 1fr))" gap="base">
-                <s-text-field label="SKU" name="sku" value={line.sku} required/><label>Quantity<input name="quantity" type="number" min="1" value={line.quantity === null ? "" : String(line.quantity)} required/></label>
-                <s-text-field label="Product title" name="title" value={line.title ?? ""}/><label>Price<input name="price" type="number" min="0" step="0.01" value={line.price ?? ""}/></label>
-                <s-text-field label="Description" name="description" value={line.description ?? ""}/><label>Image URL<input name="image_url" type="url" value={line.imageUrl ?? ""}/></label>
-              </s-grid><s-button type="submit" variant="primary">Save and revalidate</s-button>
-            </Form><Form method="post" onSubmit={(event) => { if (!window.confirm(`Remove draft row ${line.rowNumber} (${line.sku})? This does not change Shopify.`)) event.preventDefault(); }}>
-              <input type="hidden" name="intent" value="draftDeleteLine"/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="lineId" value={line.id}/><input type="hidden" name="expectedUpdatedAt" value={batch.updatedAt.toISOString()}/><s-button type="submit">Delete draft row</s-button>
-            </Form></details> : null}
-            <details>
-              <summary>Technical details</summary>
-              <s-stack direction="block" gap="small">
-                <div style={{ overflowWrap: "anywhere", wordBreak: "break-all" }}>
-                  <code>Product ID: {line.productId}</code>
-                  <s-button
-                    type="button"
-                    disabled={!line.productId}
-                    accessibilityLabel="Copy Product ID"
-                    onClick={async () => {
-                      setIdCopyFeedback(null);
-                      try {
-                        if (!line.productId || !navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-                        await navigator.clipboard.writeText(line.productId);
-                        setIdCopyFeedback({ lineId: line.id, label: "Product ID", status: "copied" });
-                      } catch {
-                        setIdCopyFeedback({ lineId: line.id, label: "Product ID", status: "failed" });
-                      }
-                    }}
-                  >Copy Product ID</s-button>
-                  {idCopyFeedback?.lineId === line.id && idCopyFeedback.label === "Product ID" && idCopyFeedback.status === "failed" ? (
-                    <div role="alert">
-                      <span>Could not access the clipboard. Select and copy the ID manually.</span>
-                      <textarea ref={manualIdCopyRef} aria-label="Product ID for manual copy" readOnly value={line.productId ?? ""} rows={2} onFocus={(event) => event.currentTarget.select()} />
-                    </div>
-                  ) : null}
-                </div>
-                <div style={{ overflowWrap: "anywhere", wordBreak: "break-all" }}>
-                  <code>Variant ID: {line.variantId}</code>
-                  <s-button
-                    type="button"
-                    disabled={!line.variantId}
-                    accessibilityLabel="Copy Variant ID"
-                    onClick={async () => {
-                      setIdCopyFeedback(null);
-                      try {
-                        if (!line.variantId || !navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-                        await navigator.clipboard.writeText(line.variantId);
-                        setIdCopyFeedback({ lineId: line.id, label: "Variant ID", status: "copied" });
-                      } catch {
-                        setIdCopyFeedback({ lineId: line.id, label: "Variant ID", status: "failed" });
-                      }
-                    }}
-                  >Copy Variant ID</s-button>
-                  {idCopyFeedback?.lineId === line.id && idCopyFeedback.label === "Variant ID" && idCopyFeedback.status === "failed" ? (
-                    <div role="alert">
-                      <span>Could not access the clipboard. Select and copy the ID manually.</span>
-                      <textarea ref={manualIdCopyRef} aria-label="Variant ID for manual copy" readOnly value={line.variantId ?? ""} rows={2} onFocus={(event) => event.currentTarget.select()} />
-                    </div>
-                  ) : null}
-                </div>
-                <div style={{ overflowWrap: "anywhere", wordBreak: "break-all" }}>
-                  <code>Inventory Item ID: {line.inventoryItemId}</code>
-                  <s-button
-                    type="button"
-                    disabled={!line.inventoryItemId}
-                    accessibilityLabel="Copy Inventory Item ID"
-                    onClick={async () => {
-                      setIdCopyFeedback(null);
-                      try {
-                        if (!line.inventoryItemId || !navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-                        await navigator.clipboard.writeText(line.inventoryItemId);
-                        setIdCopyFeedback({ lineId: line.id, label: "Inventory Item ID", status: "copied" });
-                      } catch {
-                        setIdCopyFeedback({ lineId: line.id, label: "Inventory Item ID", status: "failed" });
-                      }
-                    }}
-                  >Copy Inventory Item ID</s-button>
-                  {idCopyFeedback?.lineId === line.id && idCopyFeedback.label === "Inventory Item ID" && idCopyFeedback.status === "failed" ? (
-                    <div role="alert">
-                      <span>Could not access the clipboard. Select and copy the ID manually.</span>
-                      <textarea ref={manualIdCopyRef} aria-label="Inventory Item ID for manual copy" readOnly value={line.inventoryItemId ?? ""} rows={2} onFocus={(event) => event.currentTarget.select()} />
-                    </div>
-                  ) : null}
-                </div>
-                {idCopyFeedback?.lineId === line.id && idCopyFeedback.status === "copied" ? (
-                  <div role="status">Copied {idCopyFeedback.label}.</div>
-                ) : null}
-                <div style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>
-                  <s-paragraph>Operation stage: {line.stage} · Error code: {line.errorCode ?? "—"}</s-paragraph>
-                </div>
-              </s-stack>
-            </details>
-          </s-table-cell>
+          <s-table-cell><s-stack direction="block" gap="small"><s-badge tone={statusTone(line.status)}>{executionStarted ? statusLabel(line.status) : validationGroup(line) === "READY" ? "Ready" : validationGroup(line) === "MISSING" ? "Missing info" : "Error"}</s-badge><s-text>{line.errorDetail ?? correctionHint(line.errorCode)}</s-text><s-button type="button" onClick={() => openInspector(line.id, "details")}>{draftEditable ? "Review" : "Details"}</s-button></s-stack></s-table-cell>
         </s-table-row>)}</s-table-body>
         </s-table>
         {visibleLines.length === 0 ? <s-paragraph>No line items match these filters.</s-paragraph> : null}
@@ -445,6 +357,32 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
           <s-button disabled={linePage + 1 >= linePageCount} onClick={() => setLinePage((page) => Math.min(linePageCount - 1, page + 1))}>Next</s-button>
         </s-button-group> : null}
       </> : <s-paragraph>No import lines are recorded for this receipt.</s-paragraph>}
+      <aside className="stockhub-row-inspector" aria-label="Row inspector">
+        <div className="stockhub-row-inspector__header">
+          <h2 ref={inspectorHeadingRef} tabIndex={-1}>{inspectorMode === "add" ? "Add draft row" : selectedLine ? `Row ${selectedLine.rowNumber} · ${selectedLine.sku}` : "Row inspector"}</h2>
+          {selectedLine || inspectorMode === "add" ? <s-button type="button" onClick={() => { setSelectedLineId(null); setInspectorMode("details"); }}>Close</s-button> : null}
+        </div>
+        {!selectedLine && inspectorMode !== "add" ? <s-paragraph>Select a row to review, edit, or see Shopify details.</s-paragraph> : null}
+        {selectedLine && inspectorMode === "details" ? <s-stack direction="block" gap="base">
+          <s-badge tone={statusTone(selectedLine.status)}>{executionStarted ? statusLabel(selectedLine.status) : validationGroup(selectedLine) === "READY" ? "Ready to Merge" : validationGroup(selectedLine) === "MISSING" ? "Missing Information" : "Error"}</s-badge>
+          <s-paragraph>{selectedLine.matchedProductTitle ?? selectedLine.title ?? "No product title"}{selectedLine.matchedVariantTitle ? ` · ${selectedLine.matchedVariantTitle}` : ""}</s-paragraph>
+          <s-paragraph>Quantity: {selectedLine.expectedQuantity === null ? "—" : `${selectedLine.expectedQuantity} → `}{selectedLine.quantity ?? "—"}</s-paragraph>
+          {selectedLine.errorDetail || selectedLine.errorCode ? <details><summary>Error details</summary><s-banner tone={selectedLine.status === "BLOCKED" ? "warning" : "critical"}>{selectedLine.errorDetail ?? selectedLine.errorCode}<s-paragraph>{correctionHint(selectedLine.errorCode)}</s-paragraph></s-banner></details> : null}
+          <details><summary>Technical details</summary><s-stack direction="block" gap="small">
+            {([["Product ID", selectedLine.productId], ["Variant ID", selectedLine.variantId], ["Inventory Item ID", selectedLine.inventoryItemId]] as const).map(([label, value]) => <div key={label}><code>{label}: {value ?? "—"}</code><s-button type="button" disabled={!value} accessibilityLabel={"Copy " + label} onClick={() => copyIdentifier(label, value)}>Copy {label}</s-button>{idCopyFeedback?.label === label && idCopyFeedback.status === "failed" ? <div role="alert">Could not access the clipboard. Select and copy the ID manually.<textarea ref={manualIdCopyRef} aria-label={label + " for manual copy"} readOnly value={value ?? ""} rows={2} onFocus={(event) => event.currentTarget.select()} /></div> : null}</div>)}
+            {idCopyFeedback?.status === "copied" ? <div role="status">Copied {idCopyFeedback.label}.</div> : null}<s-paragraph>Stage: {selectedLine.stage} · Error code: {selectedLine.errorCode ?? "—"}</s-paragraph>
+          </s-stack></details>
+          {draftEditable && ["PREVIEWED", "BLOCKED"].includes(selectedLine.status) ? <s-button type="button" variant="primary" onClick={() => setInspectorMode("edit")}>Edit draft row</s-button> : null}
+        </s-stack> : null}
+        {(inspectorMode === "add" || (inspectorMode === "edit" && selectedLine)) ? <Form method="post" className="stockhub-draft-form">
+          <input type="hidden" name="intent" value={inspectorMode === "add" ? "draftAddLine" : "draftEditLine"}/><input type="hidden" name="batchId" value={batch.id}/>{selectedLine ? <input type="hidden" name="lineId" value={selectedLine.id}/> : null}<input type="hidden" name="expectedUpdatedAt" value={batch.updatedAt.toISOString()}/>
+          <s-grid gridTemplateColumns="repeat(auto-fit, minmax(180px, 1fr))" gap="base"><s-text-field label="SKU" name="sku" value={selectedLine?.sku ?? ""} required/><label>Quantity<input name="quantity" type="number" min="1" defaultValue={selectedLine?.quantity ?? undefined} required/></label><s-text-field label="Product title" name="title" value={selectedLine?.title ?? ""}/><label>Price<input name="price" type="number" min="0" step="0.01" defaultValue={selectedLine?.price ?? undefined}/></label><s-text-field label="Description" name="description" value={selectedLine?.description ?? ""}/><label>Image URL<input name="image_url" type="url" defaultValue={selectedLine?.imageUrl ?? undefined}/></label></s-grid>
+          <s-button type="submit" variant="primary">{inspectorMode === "add" ? "Add and validate row" : "Save and revalidate"}</s-button><s-button type="button" onClick={() => setInspectorMode("details")}>Cancel</s-button>
+        </Form> : null}
+        {selectedLine && inspectorMode === "edit" && draftEditable ? <s-button type="button" onClick={() => setInspectorMode("delete")}>Delete draft row</s-button> : null}
+        {selectedLine && inspectorMode === "delete" ? <div className="stockhub-delete-confirm" role="alert"><s-paragraph>Remove draft row {selectedLine.rowNumber} ({selectedLine.sku})? Duplicate-SKU sibling rows may be revalidated. This does not change Shopify.</s-paragraph><Form method="post"><input type="hidden" name="intent" value="draftDeleteLine"/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="lineId" value={selectedLine.id}/><input type="hidden" name="expectedUpdatedAt" value={batch.updatedAt.toISOString()}/><s-button type="submit">Confirm delete</s-button><s-button type="button" onClick={() => setInspectorMode("edit")}>Cancel</s-button></Form></div> : null}
+        {!draftEditable && selectedLine ? <s-banner tone="info">Locked — Shopify processing has started or this receipt is no longer a preview.</s-banner> : null}
+      </aside>
     </s-section></div>
   );
 }
