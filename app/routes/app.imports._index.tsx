@@ -35,6 +35,7 @@ import {
   mergeImportBatch,
 } from "../utils/import-merge.server";
 import {
+  DuplicateImportPreviewError,
   ImportSubmissionConflictError,
   persistImportPreview,
 } from "../utils/import-receipts.server";
@@ -100,6 +101,13 @@ type PreparedLine = {
 type ActionData = {
   error?: string;
   authorizationError?: string;
+  duplicateImport?: {
+    batchId: string;
+    receiptCode: string;
+    status: string;
+    locationName: string;
+    createdAt: Date;
+  };
   verification?: Awaited<ReturnType<typeof verifyImportBatchShopifyState>>;
 };
 
@@ -328,7 +336,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     missingLocationScopes,
     missingReadScopes,
     missingWriteScopes,
-    duplicateCsv: requestUrl.searchParams.get("duplicateCsv") === "1",
     submissionId: randomUUID(),
     maxMergeLines: MAX_MERGE_LINES,
   };
@@ -911,14 +918,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       location: { id: location.id, name: location.name },
       currencyCode: context.currencyCode,
       lines: preparedRows.map((row) => resultLineFromPrepared(row, randomUUID())),
+      duplicateConfirmed: formData.get("duplicateConfirmed") === "yes",
     });
-    const duplicateFlag = persisted.duplicateCsv ? "?duplicateCsv=1" : "";
-    return redirect(`/app/imports/history/${encodeURIComponent(persisted.batchId)}${duplicateFlag}`);
+    return redirect(`/app/imports/history/${encodeURIComponent(persisted.batchId)}`);
   } catch (error) {
     return {
+      duplicateImport: error instanceof DuplicateImportPreviewError ? error.duplicate : undefined,
       error: error instanceof ImportSubmissionConflictError
         ? error.message
-        : error instanceof Error ? error.message : "The import preview could not be saved.",
+        : error instanceof DuplicateImportPreviewError ? undefined
+          : error instanceof Error ? error.message : "The import preview could not be saved.",
     } satisfies ActionData;
   }
 };
@@ -976,6 +985,7 @@ export default function Imports() {
               onChange={(event) => updateNewImportDirty(event.currentTarget)}>
               <input type="hidden" name="intent" value="preview" />
               <input type="hidden" name="submissionId" value={data.submissionId} />
+              {actionData?.duplicateImport ? <input type="hidden" name="duplicateConfirmed" value="yes" /> : null}
               <s-stack direction="block" gap="base">
                 <div className="stockhub-destination-badge">
                   <s-text type="strong">Import destination</s-text>
@@ -1080,7 +1090,7 @@ export default function Imports() {
                 </div>
 
                 <div className="stockhub-import-actions">
-                  <s-button type="submit" variant="primary" disabled={previewDisabled}>{isSubmitting ? "Validating CSV…" : "Validate and create preview receipt"}</s-button>
+                  <s-button type="submit" variant="primary" disabled={previewDisabled}>{isSubmitting ? "Validating CSV…" : actionData?.duplicateImport ? "Confirm separate stock receipt" : "Validate and create preview receipt"}</s-button>
                 </div>
               </s-stack>
             </Form>
@@ -1122,8 +1132,12 @@ export default function Imports() {
             <s-banner tone="critical">{actionData.authorizationError ?? actionData.error}</s-banner>
           </div>
         ) : null}
-        {data.duplicateCsv ? (
-          <s-banner tone="warning">This CSV matches an earlier upload in this store. A new receipt was created for this submission; verify that it represents a separate valid stock intake before merging.</s-banner>
+        {actionData?.duplicateImport ? (
+          <s-banner tone="warning">
+            <s-heading>Duplicate CSV Detected</s-heading>
+            This file has already been uploaded to StockHub as receipt <Link to={`/app/imports/history/${encodeURIComponent(actionData.duplicateImport.batchId)}`}>{actionData.duplicateImport.receiptCode}</Link> ({actionData.duplicateImport.status}, {actionData.duplicateImport.locationName}). No duplicate batch was created.
+            <s-paragraph>Open the earlier receipt instead. If this is a distinct stock receipt, keep the same file selected and explicitly confirm a separate stock receipt.</s-paragraph>
+          </s-banner>
         ) : null}
       </s-section></div>
 

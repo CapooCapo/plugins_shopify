@@ -89,10 +89,10 @@ test("receipt detail offers a separately labeled copy action for each Shopify ID
 
   for (const [label, property] of identifiers) {
     await t.test(label, () => {
-      assert.ok(new RegExp(`(?:Copy ${label}|aria-label=["']Copy ${label}["'])`).test(technicalDetails),
+      assert.ok(technicalDetails.includes(`["${label}", selectedLine.${property}]`) && /accessibilityLabel=\{"Copy " \+ label\}/.test(technicalDetails),
         `${label} must have its own clearly labeled copy action`);
-      assert.ok(new RegExp(`writeText\\([^)]*line\\.${property}`).test(technicalDetails),
-        `${label} copy action must copy that identifier, not a different result payload`);
+      assert.ok(new RegExp(`copyIdentifier\\(label, value\\)`).test(technicalDetails),
+        `${label} copy action must use the selected identifier value`);
     });
   }
 });
@@ -103,7 +103,7 @@ test("receipt ID copy controls expose local success and clipboard-failure feedba
 
   assert.ok(/role=["']status["'][^>]*>\s*Copied/.test(technicalDetails),
     "successful ID copying must be announced beside the ID controls");
-  assert.ok(/catch\s*(?:\([^)]*\))?\s*\{/.test(technicalDetails),
+  assert.ok(/const copyIdentifier = async[\s\S]*?catch\s*\{/.test(detail),
     "a rejected clipboard write must be caught by the ID-copy flow");
   assert.ok(/Could not access the clipboard[\s\S]{0,160}(?:select and copy|copy manually|select the ID)/i.test(technicalDetails),
     "clipboard rejection must explain how to manually copy the ID");
@@ -112,27 +112,27 @@ test("receipt ID copy controls expose local success and clipboard-failure feedba
     ["Variant ID", "variantId"],
     ["Inventory Item ID", "inventoryItemId"],
   ]) {
-    assert.ok(new RegExp(`${label}:\\s*\\{line\\.${property}\\}`).test(technicalDetails),
+    assert.ok(technicalDetails.includes(`["${label}", selectedLine.${property}]`),
       `${label} must remain available as the manual-copy fallback`);
   }
 });
 
 test("receipt errors expand separately from technical identifiers", async () => {
   const detail = await source("app.imports.history.$batchId.tsx");
-  const errorDetails = detail.match(/line\.errorDetail \|\| line\.errorCode \? <details>[\s\S]*?<\/details>\s*: null/)?.[0] ?? "";
+  const errorDetails = detail.match(/selectedLine\.errorDetail \|\| selectedLine\.errorCode \? <details>[\s\S]*?<\/details>\s*: null/)?.[0] ?? "";
   const technicalDetails = disclosure(detail, "Technical details");
 
   assert.ok(errorDetails,
     "saved line errors must have their own conditional disclosure");
   assert.match(errorDetails, /<summary>Error details<\/summary>/,
     "the error disclosure must be labeled separately from technical information");
-  assert.match(errorDetails, /line\.errorDetail \?\? line\.errorCode/,
+  assert.match(errorDetails, /selectedLine\.errorDetail \?\? selectedLine\.errorCode/,
     "expanding Error details must reveal the saved line error or its code");
   assert.doesNotMatch(errorDetails, /Product ID|Variant ID|Inventory Item ID/,
     "the error disclosure must not expose technical identifiers");
   assert.match(technicalDetails, /<summary>Technical details<\/summary>/,
     "Shopify identifiers remain under a separate Technical details disclosure");
-  assert.match(technicalDetails, /Product ID: \{line\.productId\}[\s\S]*?Variant ID: \{line\.variantId\}[\s\S]*?Inventory Item ID: \{line\.inventoryItemId\}/,
+  assert.match(technicalDetails, /Product ID", selectedLine\.productId[\s\S]*?Variant ID", selectedLine\.variantId[\s\S]*?Inventory Item ID", selectedLine\.inventoryItemId/,
     "the technical disclosure continues to expose the exact saved IDs for manual review");
 });
 

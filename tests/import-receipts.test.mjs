@@ -18,6 +18,7 @@ const { outputText } = ts.transpileModule(sourceWithInjectedPrismaStub, {
 });
 const helperUrl = `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`;
 const {
+  DuplicateImportPreviewError,
   formatReceiptCode,
   ImportSubmissionConflictError,
   persistImportPreview,
@@ -124,10 +125,21 @@ function makeDatabase() {
   };
 
   const transaction = { importBatch, importReceiptCounter, activityLog };
+  let transactionTail = Promise.resolve();
   const database = {
     ...transaction,
     async $transaction(callback) {
-      return callback(transaction);
+      // Model PostgreSQL's serializable decision boundary so concurrent
+      // checksum checks cannot both create a preview in this focused test.
+      const previous = transactionTail;
+      let release;
+      transactionTail = new Promise((resolve) => { release = resolve; });
+      await previous;
+      try {
+        return await callback(transaction);
+      } finally {
+        release();
+      }
     },
   };
   return { database, state };
@@ -184,18 +196,72 @@ test("concurrent preview requests with the same token recover the unique-index w
   assert.equal(state.batches.length, 1);
 });
 
-test("a fresh token can create a new receipt for the same CSV and returns a duplicate warning", async () => {
+test("a fresh token with identical shop-scoped CSV bytes returns the original receipt and creates no batch", async () => {
+  const { database, state } = makeDatabase();
+  const first = await persistImportPreview(makeInput(), database);
+  await assert.rejects(
+    persistImportPreview(makeInput({
+      submissionId: "00000000-0000-4000-8000-000000000002",
+      fileName: "delivery-copy.csv",
+      lines: [{ ...makeInput().lines[0], id: "line-2", operationId: "operation-2", idempotencyKey: "idempotency-2" }],
+    }), database),
+    (error) => error instanceof DuplicateImportPreviewError
+      && error.duplicate.batchId === first.batchId
+      && error.duplicate.receiptCode === first.receiptCode
+      && error.duplicate.status === "PREVIEWED",
+  );
+  assert.equal(state.batches.length, 1);
+});
+
+test("concurrent fresh tokens with identical CSV bytes create one preview and return its duplicate record", async () => {
+  const { database, state } = makeDatabase();
+  const [left, right] = await Promise.allSettled([
+    persistImportPreview(makeInput({ submissionId: "00000000-0000-4000-8000-000000000003" }), database),
+    persistImportPreview(makeInput({
+      submissionId: "00000000-0000-4000-8000-000000000004",
+      fileName: "delivery-copy.csv",
+      lines: [{ ...makeInput().lines[0], id: "line-4", operationId: "operation-4", idempotencyKey: "idempotency-4" }],
+    }), database),
+  ]);
+
+  const fulfilled = [left, right].filter((result) => result.status === "fulfilled");
+  const rejected = [left, right].filter((result) => result.status === "rejected");
+  assert.equal(fulfilled.length, 1);
+  assert.equal(rejected.length, 1);
+  assert.equal(state.batches.length, 1);
+  assert.ok(rejected[0].reason instanceof DuplicateImportPreviewError);
+  assert.equal(rejected[0].reason.duplicate.batchId, fulfilled[0].value.batchId);
+});
+
+test("an explicit repeat confirmation creates a distinct receipt without weakening normal duplicate protection", async () => {
   const { database, state } = makeDatabase();
   const first = await persistImportPreview(makeInput(), database);
   const second = await persistImportPreview(makeInput({
-    submissionId: "00000000-0000-4000-8000-000000000002",
-    lines: [{ ...makeInput().lines[0], id: "line-2", operationId: "operation-2", idempotencyKey: "idempotency-2" }],
+    submissionId: "00000000-0000-4000-8000-000000000005",
+    fileName: "separate-delivery.csv",
+    duplicateConfirmed: true,
+    lines: [{ ...makeInput().lines[0], id: "line-5", operationId: "operation-5", idempotencyKey: "idempotency-5" }],
   }), database);
 
   assert.notEqual(second.batchId, first.batchId);
-  assert.notEqual(second.receiptCode, first.receiptCode);
   assert.equal(second.duplicateCsv, true);
   assert.equal(state.batches.length, 2);
+});
+
+test("the import route exposes the duplicate receipt before any duplicate batch is created", async () => {
+  const [newImport, receiptDetail] = await Promise.all([
+    readFile(new URL("../app/routes/app.imports._index.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/routes/app.imports.history.$batchId.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(newImport, /createHash\("sha256"\)\.update\(Buffer\.from\(fileBytes\)\)\.digest\("hex"\)/,
+    "the upload route checksums original uploaded bytes rather than the filename");
+  assert.match(newImport, /DuplicateImportPreviewError[\s\S]*?duplicateImport/,
+    "the action returns the existing receipt record instead of redirecting to a new duplicate batch");
+  assert.match(newImport, /Duplicate CSV Detected[\s\S]*?No duplicate batch was created/,
+    "the upload UI explains the block and links to the prior receipt");
+  assert.doesNotMatch(receiptDetail, /duplicateCsv|This CSV matches an earlier upload/,
+    "receipt detail does not need a redirect-only duplicate warning");
 });
 
 test("a submission token cannot be replayed with a different CSV or location", async () => {

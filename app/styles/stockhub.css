@@ -1069,6 +1069,32 @@ body.stockhub-app-frame::before {
   .stockhub-draft-status-summary button { min-height: 44px; }
 }
 
+/* Inventory receipt workspace: dense review table plus a separate editor. */
+.stockhub-receipt-card { min-width: 0; }
+.stockhub-draft-status-summary button[aria-pressed="true"] { border-color: var(--stockhub-accent, #3b82f6); box-shadow: inset 0 0 0 1px var(--stockhub-accent, #3b82f6); }
+.stockhub-merge-bar { position: sticky; z-index: 4; bottom: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--stockhub-border); border-radius: 10px; background: var(--stockhub-surface, #fff); box-shadow: 0 -8px 20px rgb(16 24 40 / 8%); }
+.stockhub-merge-confirmation { flex: 1 1 100%; padding: 12px; border-radius: 8px; background: var(--stockhub-surface-subdued, #f7f8fa); }
+.stockhub-row-inspector { position: sticky; z-index: 3; top: 16px; max-width: 420px; margin: 18px 0 0 auto; padding: 16px; border: 1px solid var(--stockhub-border); border-radius: 12px; background: var(--stockhub-surface, #fff); box-shadow: 0 8px 24px rgb(16 24 40 / 10%); }
+.stockhub-row-inspector__header { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.stockhub-row-inspector__header h2 { margin: 0; font-size: 1.05rem; }
+.stockhub-row-inspector code { display: block; overflow-wrap: anywhere; }
+.stockhub-delete-confirm { margin-top: 12px; padding: 12px; border-inline-start: 3px solid var(--stockhub-danger, #b42318); background: #fff5f4; }
+
+@media (min-width: 1280px) {
+  .stockhub-receipt-card > s-section { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 18px; }
+  .stockhub-receipt-card > s-section > .stockhub-row-inspector { grid-column: 2; grid-row: 1 / span 20; width: auto; margin-top: 0; }
+  .stockhub-receipt-card > s-section > :not(.stockhub-row-inspector) { grid-column: 1; }
+}
+
+@media (max-width: 900px) {
+  .stockhub-row-inspector { max-width: none; }
+}
+
+@media (max-width: 600px) {
+  .stockhub-row-inspector { position: relative; top: auto; margin-bottom: 72px; padding: 12px; }
+  .stockhub-merge-bar { bottom: 0; border-radius: 8px 8px 0 0; }
+}
+
 .stockhub-receipt-progress {
   display: grid;
   gap: 8px;

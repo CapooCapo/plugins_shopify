@@ -8,7 +8,7 @@ const detailRoute = new URL("../app/routes/app.imports.history.$batchId.tsx", im
 test("PREVIEWED eligible receipt exposes a primary Merge action below line-item filters", async () => {
   const source = await readFile(detailRoute, "utf8");
   const groupStart = source.indexOf('<div className="stockhub-receipt-actions" role="group" aria-label="Receipt actions">');
-  const mergeActionStart = source.indexOf('<div className="stockhub-merge-action">');
+  const mergeActionStart = source.indexOf('<div className="stockhub-merge-action stockhub-merge-bar">');
 
   assert.ok(groupStart >= 0 && mergeActionStart > groupStart, "receipt verification action wrapper and line-item Merge action must be rendered");
   const actionGroup = source.slice(groupStart, source.indexOf("      {mergeDisabledReason", groupStart));
@@ -43,10 +43,10 @@ test("PREVIEWED eligible receipt exposes a primary Merge action below line-item 
     "the read-only verification action must remain a POST form");
   assert.ok(source.indexOf("label=\"Search line items\"") < mergeActionStart && mergeActionStart < source.indexOf("<s-text>{filteredLines.length}"),
     "Merge/Resume must appear immediately below the line-item filters and before the results/table");
-  assert.match(mergeAction, /<Form method="post" onSubmit=[\s\S]*?name="intent" value=\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}[\s\S]*?name="confirmed" value="yes"[\s\S]*?name="confirmedCount"[\s\S]*?variant="primary"[\s\S]*?disabled=\{mergeDisabled\}[\s\S]*?<\/Form>/,
-    "Merge/Resume must retain its confirmation and original POST fields");
+  assert.match(mergeAction, /role="dialog" aria-label="Confirm inventory merge"[\s\S]*?<Form method="post">[\s\S]*?name="intent" value=\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}[\s\S]*?name="confirmed" value="yes"[\s\S]*?name="confirmedCount"[\s\S]*?Confirm merge of \{eligibleCount\} rows[\s\S]*?<\/Form>/,
+    "Merge/Resume must retain its explicit confirmation dialog and original POST fields");
   assert.match(mergeAction, /name="confirmedCount"/);
-  assert.match(mergeAction, /will remain in this receipt and will not be sent to Shopify/);
+  assert.match(mergeAction, /blocked row\(s\) will remain attached to this receipt/);
 });
 
 test("draft CRUD is tenant/state/version guarded, revalidates rows, and never calls Shopify writes", async () => {
