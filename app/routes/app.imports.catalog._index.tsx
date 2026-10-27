@@ -27,6 +27,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const contentType = request.headers.get("content-type");
     if (contentType) headers.set("content-type", contentType);
     const form = await new Request(request.url, { method: request.method, headers, body }).formData();
+    if (form.get("intent") === "prepare-import-draft") {
+      const field = (name: string) => String(form.get(name) ?? "").trim();
+      const productName = field("productName");
+      const sku = field("sku");
+      const price = field("price");
+      const description = field("description");
+      const imageUrl = field("imageUrl");
+      const sourceReceiptCode = field("sourceReceiptCode").replace(/[^A-Za-z0-9-]/g, "").slice(0, 64);
+      const sourceRowNumber = Math.max(0, Number.parseInt(field("sourceRowNumber"), 10) || 0);
+      const errors: string[] = [];
+      if (!productName) errors.push("Product Name is required.");
+      if (!sku) errors.push("SKU is required.");
+      const priceValid = !price || /^(?:0|[1-9]\d{0,13})(?:\.\d{1,6})?$/.test(price);
+      if (!priceValid) errors.push("Price must be a non-negative decimal with up to 14 integer digits and 6 fractional digits.");
+      if (price && /^0(?:\.0{1,6})?$/.test(price)) errors.push("Confirm that zero price is intentional.");
+      const originalCsv = ["Product Name,SKU,Price,Description,Image URL", [productName, sku, price, description, imageUrl].map((value) => `"${value.replaceAll('"', '""')}"`).join(",")].join("\n") + "\n";
+      const id = randomUUID();
+      await prisma.$transaction([
+        prisma.catalogImportBatch.create({ data: {
+          id, shop: session.shop, submissionId: randomUUID(), fileName: sourceReceiptCode ? `Inventory receipt ${sourceReceiptCode} row ${sourceRowNumber || "manual"} product draft.csv` : "Inventory import product draft.csv",
+          fileChecksum: checksumCatalogCsv(originalCsv), originalCsv, sourceHeaders: ["Product Name", "SKU", "Price", "Description", "Image URL"],
+          mapping: { 0: "productName", 1: "sku", 2: "price", 3: "description", 4: "imageUrl" }, status: "DRAFT", draftVersion: 0,
+        } }),
+        prisma.catalogImportLine.create({ data: {
+          id: randomUUID(), shop: session.shop, batchId: id, rowNumber: 1, sourceRowNumber: sourceRowNumber || null,
+          sourceValues: [productName, sku, price, description, imageUrl], productName: productName || null, sku: sku || null,
+          price: priceValid && price ? price : null, description: description || null, imageUrl: imageUrl || null,
+          status: errors.length ? "ERROR" : "READY", errors,
+        } }),
+      ]);
+      return redirect(`/app/imports/catalog/${encodeURIComponent(id)}?prepared=inventory`);
+    }
     const file = form.get("file");
     if (!(file instanceof File) || !file.size) return { error: "Choose a CSV file first." };
     if (file.size > MAX_CSV_BYTES) return { error: `Catalog CSVs are limited to ${MAX_CSV_BYTES.toLocaleString()} bytes.` };

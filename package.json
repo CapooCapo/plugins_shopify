@@ -15,6 +15,8 @@
     "setup": "prisma generate && prisma migrate deploy",
     "lint": "eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .",
     "test": "node scripts/run-tests.mjs",
+    "test:postgres": "node scripts/postgres-test-guard.mjs test",
+    "db:test:migrate": "node scripts/postgres-test-guard.mjs migrate",
     "test:csv": "node --test tests/csv-preview.test.mjs",
     "shopify": "shopify",
     "prisma": "prisma",

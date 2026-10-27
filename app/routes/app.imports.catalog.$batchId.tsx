@@ -278,7 +278,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     })),
     { warnMissingImage },
   );
-  return { batch, groups, headers, samples, fields: CATALOG_FIELDS, labels, quality, warnMissingImage };
+  return { batch, groups, headers, samples, fields: CATALOG_FIELDS, labels, quality, warnMissingImage, prepared: new URL(request.url).searchParams.get("prepared") };
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -428,7 +428,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function CatalogImportDetail() {
-  const { batch, groups, headers, samples, fields, labels: fieldLabels, quality, warnMissingImage } = useLoaderData<typeof loader>();
+  const { batch, groups, headers, samples, fields, labels: fieldLabels, quality, warnMissingImage, prepared } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const [editingMapping, setEditingMapping] = useState(false);
   const [qualitySearch, setQualitySearch] = useState("");
@@ -465,6 +465,7 @@ export default function CatalogImportDetail() {
   };
   return <main className="stockhub-import-new stockhub-catalog-imports">
     <header className="stockhub-import-page-header"><div><div className="stockhub-overview-eyebrow">Product Catalog · Draft</div><h1>{batch.fileName}</h1><p>Draft only; catalog data is not sent to Shopify. Version {batch.draftVersion} · SHA-256 {batch.fileChecksum}</p></div><div><Link to="/app/imports/catalog">All catalog drafts</Link><Form method="post" onSubmit={(event) => { if (!confirm("Delete this catalog draft and its retained source CSV?")) event.preventDefault(); }}><input type="hidden" name="intent" value="delete-batch" /><input type="hidden" name="draftVersion" value={batch.draftVersion} /><button type="submit">Delete draft</button></Form></div></header>
+    {prepared === "inventory" ? <p role="status">Inventory import values were copied into this product draft. Review and complete the draft; this does not create a Shopify product.</p> : null}
     {actionData?.error ? <p role="alert">{actionData.error}</p> : null}
     {batch.status === "DRAFT" ? <section className="stockhub-panel stockhub-catalog-quality" aria-labelledby="catalog-quality-heading">
       <h2 id="catalog-quality-heading">Product data quality</h2>
