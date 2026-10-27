@@ -77,8 +77,14 @@ function matchesWhere(record, where = {}) {
   return Object.entries(where).every(([key, condition]) => {
     if (key === "OR") return condition.some((entry) => matchesWhere(record, entry));
     if (key === "AND") return condition.every((entry) => matchesWhere(record, entry));
+    if (key === "batch" && condition && typeof condition === "object" && "is" in condition) {
+      return matchesWhere(record.batch, condition.is);
+    }
 
     const actual = record[key];
+    if (actual instanceof Date && condition instanceof Date) {
+      return actual.getTime() === condition.getTime();
+    }
     if (condition && typeof condition === "object" && !(condition instanceof Date)) {
       if ("in" in condition) return condition.in.includes(actual);
       if ("notIn" in condition) return !condition.notIn.includes(actual);
@@ -142,9 +148,18 @@ function makePrisma({ batch, lines = batch.lines, beforeClaim, failSucceededLine
         return structuredClone(line);
       },
       async updateMany({ where, data }) {
-        const selected = state.lines.filter((line) => matchesWhere(line, where));
+        const selected = state.lines.filter((line) => matchesWhere({ ...line, batch: state.batch }, where));
+        if (selected.length && failSucceededLineUpdateOnce && data.status === "SUCCEEDED") {
+          failSucceededLineUpdateOnce = false;
+          throw new Error("simulated Prisma write failure after Shopify accepted mutation");
+        }
         for (const line of selected) Object.assign(line, structuredClone(data));
         return { count: selected.length };
+      },
+      async findUniqueOrThrow({ where }) {
+        const line = state.lines.find((candidate) => matchesWhere(candidate, where));
+        if (!line) throw new Error("ImportLine not found");
+        return structuredClone(line);
       },
     },
     async $transaction(callback) {
@@ -824,6 +839,21 @@ test("pre-blocked invalid rows never reach Shopify mutations", async () => {
   assert.equal(result.status, "FAILED");
   assert.equal(result.lines[0].status, "BLOCKED");
   assert.equal(calls.some((call) => call.operationName !== "StockHubValidateLocation"), false);
+});
+
+test("explicit partial merge processes eligible rows while retaining blocked rows", async () => {
+  const ready = makeLine({ id: "line-ready", sku: "SKU-1" });
+  const blocked = makeLine({ id: "line-blocked", rowNumber: 3, sku: "BAD-SKU", operationType: "BLOCKED", status: "BLOCKED", errorCode: "CSV_INVALID_ROW" });
+  const batch = makeBatch({ lines: [ready, blocked] });
+  const { prisma, state } = makePrisma({ batch });
+  const { admin, calls } = makeAdmin({ skuResults: [existingVariant()] });
+
+  const result = await run(batch, admin, prisma);
+
+  assert.equal(result.status, "PARTIAL");
+  assert.equal(state.lines.find((line) => line.id === "line-ready").status, "SUCCEEDED");
+  assert.equal(state.lines.find((line) => line.id === "line-blocked").status, "BLOCKED");
+  assert.equal(calls.some((call) => call.operationName === "StockHubAdjustIncoming"), true);
 });
 
 test("batch status reflects verified 10/10, 0/10, and 7/10 line outcomes", async (t) => {

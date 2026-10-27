@@ -1,0 +1,14 @@
+{
+  "body": "PRODUCT CATALOG · DRAFT\ncatalog-english.csv\n\nDraft only; catalog data is not sent to Shopify. Version 0 · SHA-256 0000000000000000000000000000000000000000000000000000000000000000\n\nAll catalog drafts\nDelete draft\n\nMap Product Name and SKU. Other fields are optional. Duplicate source headers remain separate by column position. Quantity is not a catalog field.\n\nSource column\tSuggested mapping\tSample\nProduct Name Column 1\t\nIgnore\nProduct Name\nSKU\nPrice\nDescription\nProduct Group Code\nSize\nColor\nVendor\nProduct Type\nImage URL\n\tCanvas Weekend Bag\nSKU Column 2\t\nIgnore\nProduct Name\nSKU\nPrice\nDescription\nProduct Group Code\nSize\nColor\nVendor\nProduct Type\nImage URL\n\tEN-BAG-001\nPrice Column 3\t\nIgnore\nProduct Name\nSKU\nPrice\nDescription\nProduct Group Code\nSize\nColor\nVendor\nProduct Type\nImage URL\n\t38.50\nDescription Column 4\t\nIgnore\nProduct Name\nSKU\nPrice\nDescription\nProduct Group Code\nSize\nColor\nVendor\nProduct Type\nImage URL\n\tDurable canvas bag with a long strap and a separate inside pocket.\nSize Column 5\t\nIgnore\nProduct Name\nSKU\nPrice\nDescription\nProduct Group Code\nSize\nColor\nVendor\nProduct Type\nImage URL\n\tOne size\nColor Column 6\t\nIgnore\nProduct Name\nSKU\nPrice\nDescription\nProduct Group Code\nSize\nColor\nVendor\nProduct Type\nImage URL\n\tOlive\nVendor Column 7\t\nIgnore\nProduct Name\nSKU\nPrice\nDescription\nProduct Group Code\nSize\nColor\nVendor\nProduct Type\nImage URL\n\tNorthstar Supply\nQuantity Column 8\t\nIgnore\nProduct Name\nSKU\nPrice\nDescription\nProduct Group Code\nSize\nColor\nVendor\nProduct Type\nImage URL\n\t7\nPreview normalized data",
+  "metrics": "{\"viewport\":{\"width\":1280,\"height\":900},\"documentWidth\":1280,\"bodyWidth\":1280,\"page\":{\"x\":0,\"y\":0,\"width\":0,\"height\":0},\"content\":null,\"header\":null,\"cards\":[],\"quickActions\":null,\"recentImports\":null,\"primaryActionCount\":0,\"quickActionLinkCount\":0,\"polarisPageDefined\":true,\"polarisButtonDefined\":true,\"products\":null,\"newImport\":null,\"catalog\":{\"route\":\"/app/imports/catalog/visual-catalog-1\",\"pageWidth\":1280,\"tableRegions\":[{\"label\":\"Source column mappings; scroll horizontally to see all columns\",\"tabIndex\":0,\"width\":1216,\"right\":1248,\"clientWidth\":1214,\"scrollWidth\":1214,\"tableWidth\":1214}],\"fieldCount\":0,\"fieldRects\":[],\"rowCardCount\":0,\"rowStatuses\":[],\"zeroConfirmationCount\":0,\"fileInput\":false,\"previewButton\":true,\"shopifyMutationCalls\":0},\"receiptActions\":null}",
+  "values": [
+    "productName",
+    "sku",
+    "price",
+    "description",
+    "size",
+    "color",
+    "vendor",
+    ""
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "duplicateMappingError": "productName is mapped more than once. Each catalog field can be mapped from one source column.",
+  "missingMappingError": "Map a source column to Product Name before continuing."
+}

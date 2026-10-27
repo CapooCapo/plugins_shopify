@@ -68,7 +68,7 @@ test("receipt code is visible after preview, in merge confirmation, and in histo
   assert.match(history, /function\s+receiptCodeLabel\s*\([^)]*\)\s*\{[\s\S]*?receiptCode\?\.trim\(\)\s*\|\|\s*["'`]No receipt code recorded \(legacy batch\)["'`]/);
   assert.match(detail, /Receipt\s*\{batch\.receiptCode\}/,
     "the receipt detail heading must display its saved receipt code");
-  assert.match(detail, /Confirm \$\{batch\.status === "PREVIEWED" \? "merge" : "resume"\} for receipt \$\{batch\.receiptCode\}/);
+  assert.match(detail, /Confirm \$\{batch\.status === "PREVIEWED" \? "merge" : "resume"\} of \$\{batch\.lines\.filter/);
   assert.match(route, /return redirect\(`\/app\/imports\/history\/\$\{encodeURIComponent\(persisted\.batchId\)\}/,
     "a saved preview opens the receipt detail page that displays its generated code");
   assert.match(route, /This CSV matches an earlier upload in this store/);

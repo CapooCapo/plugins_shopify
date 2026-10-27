@@ -6,6 +6,7 @@ import type {
 } from "react-router";
 import {
   Form,
+  Link,
   redirect,
   useActionData,
   useLoaderData,
@@ -203,6 +204,45 @@ function resultLineFromPrepared(prepared: PreparedLine, id: string) {
   };
 }
 
+function csvCell(value: string) {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function draftCsvRowFromValues(values: string[], rowNumber: number) {
+  const row = parseCsvPreview(`sku,quantity,title,price,description,image_url\n${values.map(csvCell).join(",")}`)[0];
+  if (!row) throw new Error("Enter a valid import row.");
+  return { ...row, rowNumber };
+}
+
+function draftCsvRow(formData: FormData, rowNumber: number) {
+  return draftCsvRowFromValues(["sku", "quantity", "title", "price", "description", "image_url"]
+    .map((key) => String(formData.get(key) ?? "")), rowNumber);
+}
+
+function savedLineAsCsvRow(line: { rowNumber: number; sku: string; quantity: number | null; title: string | null; price: string | null; description: string | null; imageUrl: string | null }) {
+  return draftCsvRowFromValues([line.sku, line.quantity === null ? "" : String(line.quantity), line.title ?? "", line.price ?? "", line.description ?? "", line.imageUrl ?? ""], line.rowNumber);
+}
+
+async function prepareDraftLine(admin: AdminApiContext, row: CsvPreviewRow, locationId: string): Promise<PreparedLine> {
+  if (row.errors.length) return { row, operationType: "BLOCKED", status: "BLOCKED", errorCode: "CSV_INVALID_ROW", errorDetail: row.errors.join(" "), expectedQuantity: null };
+  let lookup: Awaited<ReturnType<typeof lookupVariants>>;
+  try { lookup = await lookupVariants(admin, [row.sku], locationId); }
+  catch { return { row, operationType: "BLOCKED", status: "BLOCKED", errorCode: "SKU_LOOKUP_INCOMPLETE", errorDetail: "Shopify SKU and location matching could not be completed. This row is blocked until it can be validated again.", expectedQuantity: null }; }
+  if (lookup.incompleteSkus.has(row.sku)) return { row, operationType: "BLOCKED", status: "BLOCKED", errorCode: "SKU_LOOKUP_INCOMPLETE", errorDetail: "Shopify returned too many candidates to determine an exact SKU match safely.", expectedQuantity: null };
+  const matches = lookup.matches.get(row.sku) ?? [];
+  if (matches.length > 1) return { row, operationType: "BLOCKED", status: "BLOCKED", errorCode: "SKU_AMBIGUOUS", errorDetail: "More than one exact SKU match exists in this store.", expectedQuantity: null };
+  if (matches.length === 1) {
+    const match = matches[0]!;
+    if (!match.inventoryItem.tracked) return { row, operationType: "BLOCKED", status: "BLOCKED", errorCode: "INVENTORY_NOT_TRACKED", errorDetail: "Inventory tracking is disabled for this variant.", match, expectedQuantity: null };
+    const expectedQuantity = match.inventoryItem.inventoryLevel?.quantities.find((item) => item.name === "available")?.quantity;
+    if (expectedQuantity === undefined) return { row, operationType: "BLOCKED", status: "BLOCKED", errorCode: "LOCATION_NOT_STOCKED", errorDetail: "This variant is not stocked at the selected location; the app will not activate existing inventory automatically.", match, expectedQuantity: null };
+    return { row, operationType: "ADJUST", status: "READY", errorCode: null, errorDetail: null, match, expectedQuantity };
+  }
+  const missing = [...(!row.title ? ["title"] : []), ...(row.price === null ? ["price"] : [])];
+  if (missing.length) return { row, operationType: "BLOCKED", status: "BLOCKED", errorCode: "NEW_PRODUCT_FIELDS_MISSING", errorDetail: `New SKU requires ${missing.join(" and ")}.`, expectedQuantity: null };
+  return { row, operationType: "CREATE_DRAFT", status: "READY", errorCode: null, errorDetail: null, expectedQuantity: null };
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin, scopes } = await authenticate.admin(request);
   const requestUrl = new URL(request.url);
@@ -319,6 +359,130 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const intent = formData.get("intent");
+  if (intent === "draftAddLine" || intent === "draftEditLine" || intent === "draftDeleteLine") {
+    const batchId = String(formData.get("batchId") ?? "");
+    const expectedUpdatedAt = new Date(String(formData.get("expectedUpdatedAt") ?? ""));
+    if (!batchId || Number.isNaN(expectedUpdatedAt.getTime())) return { error: "Refresh this draft before editing; its version could not be verified." } satisfies ActionData;
+    const batch = await prisma.importBatch.findFirst({ where: { id: batchId, shop: session.shop }, include: { lines: { orderBy: { rowNumber: "asc" } } } });
+    if (!batch) return { error: "This import receipt was not found in the authenticated store." } satisfies ActionData;
+    if (batch.status !== "PREVIEWED" || batch.lines.some((line) => line.stage !== "PREPARED" || !["PREVIEWED", "BLOCKED"].includes(line.status))) return { error: "This draft is locked because Shopify processing has started." } satisfies ActionData;
+    if (batch.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return { error: "This draft changed in another tab. Refresh it before making another edit." } satisfies ActionData;
+    if (intent !== "draftDeleteLine") {
+      const missing = missingScopesForGrant(grantedScopes, ["read_products", "read_inventory", "read_locations"]);
+      if (missing.length) return { error: `Shopify authorization is missing: ${missing.join(", ")}. Reauthorize before validating this row.` } satisfies ActionData;
+    }
+    const lineId = String(formData.get("lineId") ?? "");
+    const preparedLines: Array<{ id: string | null; prepared: PreparedLine; original: (typeof batch.lines)[number] | null }> = [];
+    if (intent !== "draftDeleteLine") {
+      const rowNumber = intent === "draftAddLine" ? Math.max(0, ...batch.lines.map((line) => line.rowNumber)) + 1 : batch.lines.find((line) => line.id === lineId)?.rowNumber;
+      if (!rowNumber) return { error: "This draft row no longer exists. Refresh and try again." } satisfies ActionData;
+      if (rowNumber > MAX_CSV_ROWS) return { error: `A draft cannot exceed ${MAX_CSV_ROWS} rows.` } satisfies ActionData;
+      const original = intent === "draftEditLine" ? batch.lines.find((line) => line.id === lineId) ?? null : null;
+      if (intent === "draftEditLine" && !original) return { error: "This draft row no longer exists. Refresh and try again." } satisfies ActionData;
+      let row: CsvPreviewRow;
+      try { row = draftCsvRow(formData, rowNumber); }
+      catch (error) { return { error: error instanceof Error ? error.message : "The row could not be validated." } satisfies ActionData; }
+      const locationContext = await queryLocations(admin);
+      if (locationContext.status !== "ready" || locationContext.shopDomain.toLowerCase() !== session.shop.toLowerCase() || !locationContext.locations.some((location) => location.id === batch.locationId && location.isActive)) {
+        return { error: "The draft location could not be verified for this store. No changes were saved." } satisfies ActionData;
+      }
+      if (!sameScopeGrant(grantedScopes, locationContext.scopes)) return { authorizationError: SCOPE_VERIFICATION_MISMATCH } satisfies ActionData;
+      const candidateLines = batch.lines.filter((line) => line.id === lineId || line.sku === row.sku || line.sku === original?.sku);
+      const candidates: Array<{ id: string; original: (typeof batch.lines)[number] | null; row: CsvPreviewRow }> = candidateLines.map((line) => ({ id: line.id, original: line, row: line.id === lineId ? row : savedLineAsCsvRow(line) }));
+      if (intent === "draftAddLine") candidates.push({ id: "", original: null, row });
+      const skuCounts = new Map<string, number>();
+      for (const candidate of candidates) if (candidate.row.sku) skuCounts.set(candidate.row.sku, (skuCounts.get(candidate.row.sku) ?? 0) + 1);
+      const newLineId = intent === "draftAddLine" ? randomUUID() : null;
+      for (const candidate of candidates) {
+        const duplicates = (skuCounts.get(candidate.row.sku) ?? 0) > 1;
+        if (duplicates) candidate.row.errors.push(`SKU "${candidate.row.sku}" appears more than once in this draft.`);
+        const prepared = await prepareDraftLine(admin, candidate.row, batch.locationId);
+        if (candidate.original && candidate.original.sku === candidate.row.sku && candidate.original.productId && candidate.original.expectedQuantity !== null && prepared.operationType === "ADJUST") {
+          // Keep the preview-time inventory baseline so an unrelated draft edit
+          // cannot mask stock changes that the merge safety check must detect.
+          prepared.expectedQuantity = candidate.original.expectedQuantity;
+        }
+        preparedLines.push({ id: candidate.id || newLineId, prepared, original: candidate.original });
+      }
+    } else {
+      const target = batch.lines.find((line) => line.id === lineId && ["PREVIEWED", "BLOCKED"].includes(line.status) && line.stage === "PREPARED");
+      if (!target) return { error: "Only unprocessed draft rows can be removed." } satisfies ActionData;
+      const duplicateSiblings = batch.lines.filter((line) => line.id !== target.id && line.sku === target.sku && line.errorCode === "CSV_INVALID_ROW" && line.errorDetail?.includes("appears more than once"));
+      if (duplicateSiblings.length) {
+        const missing = missingScopesForGrant(grantedScopes, ["read_products", "read_inventory", "read_locations"]);
+        if (missing.length) return { error: `Shopify authorization is missing: ${missing.join(", ")}. Reauthorize before revalidating duplicate rows.` } satisfies ActionData;
+        const locationContext = await queryLocations(admin);
+        if (locationContext.status !== "ready" || locationContext.shopDomain.toLowerCase() !== session.shop.toLowerCase() || !locationContext.locations.some((location) => location.id === batch.locationId && location.isActive)) return { error: "The draft location could not be verified for this store. No changes were saved." } satisfies ActionData;
+        if (!sameScopeGrant(grantedScopes, locationContext.scopes)) return { authorizationError: SCOPE_VERIFICATION_MISMATCH } satisfies ActionData;
+        for (const line of duplicateSiblings) {
+          const row = savedLineAsCsvRow(line);
+          const prepared = await prepareDraftLine(admin, row, batch.locationId);
+          if (line.productId && line.expectedQuantity !== null && prepared.operationType === "ADJUST") prepared.expectedQuantity = line.expectedQuantity;
+          preparedLines.push({ id: line.id, prepared, original: line });
+        }
+      }
+    }
+    try {
+      await prisma.$transaction(async (tx) => {
+        const claimed = await tx.importBatch.updateMany({ where: { id: batch.id, shop: session.shop, status: "PREVIEWED", updatedAt: expectedUpdatedAt }, data: { updatedAt: new Date(Math.max(Date.now(), expectedUpdatedAt.getTime() + 1)) } });
+        if (claimed.count !== 1) throw new Error("DRAFT_CONFLICT");
+        if (intent === "draftAddLine" || intent === "draftEditLine") {
+          for (const candidate of preparedLines) {
+            const prepared = candidate.prepared;
+            const keepPriorMatch = Boolean(candidate.original?.productId && candidate.original.sku === prepared.row.sku && prepared.status === "BLOCKED");
+            const data = {
+              sku: prepared.row.sku, title: prepared.row.title, description: prepared.row.description, price: prepared.row.price,
+              imageUrl: prepared.row.image_url, quantity: prepared.row.quantity, operationType: prepared.operationType,
+              status: prepared.status === "READY" ? "PREVIEWED" : "BLOCKED", stage: "PREPARED",
+              productId: prepared.match?.product.id ?? (keepPriorMatch ? candidate.original!.productId : null),
+              variantId: prepared.match?.id ?? (keepPriorMatch ? candidate.original!.variantId : null),
+              inventoryItemId: prepared.match?.inventoryItem.id ?? (keepPriorMatch ? candidate.original!.inventoryItemId : null),
+              expectedQuantity: prepared.match ? prepared.expectedQuantity : keepPriorMatch ? candidate.original!.expectedQuantity : prepared.expectedQuantity,
+              matchedProductTitle: prepared.match?.product.title ?? (keepPriorMatch ? candidate.original!.matchedProductTitle : null),
+              matchedVariantTitle: prepared.match?.title ?? (keepPriorMatch ? candidate.original!.matchedVariantTitle : null),
+              errorCode: prepared.errorCode, errorDetail: prepared.errorDetail,
+            };
+            if (!candidate.original) {
+              await tx.importLine.create({ data: { ...resultLineFromPrepared(prepared, candidate.id!), batchId: batch.id } });
+            } else {
+              const updated = await tx.importLine.updateMany({ where: { id: candidate.id!, batchId: batch.id, status: candidate.original.status, stage: "PREPARED" }, data });
+              if (updated.count !== 1) throw new Error("DRAFT_CONFLICT");
+            }
+          }
+        } else if (intent === "draftDeleteLine") {
+          const deleted = await tx.importLine.deleteMany({ where: { id: lineId, batchId: batch.id, status: { in: ["PREVIEWED", "BLOCKED"] }, stage: "PREPARED" } });
+          if (deleted.count !== 1) throw new Error("DRAFT_CONFLICT");
+          for (const candidate of preparedLines) {
+            const prepared = candidate.prepared;
+            const keepPriorMatch = Boolean(candidate.original?.productId && candidate.original.sku === prepared.row.sku && prepared.status === "BLOCKED");
+            const updated = await tx.importLine.updateMany({ where: { id: candidate.id!, batchId: batch.id, status: candidate.original!.status, stage: "PREPARED" }, data: {
+              sku: prepared.row.sku, title: prepared.row.title, description: prepared.row.description, price: prepared.row.price,
+              imageUrl: prepared.row.image_url, quantity: prepared.row.quantity, operationType: prepared.operationType,
+              status: prepared.status === "READY" ? "PREVIEWED" : "BLOCKED", stage: "PREPARED",
+              productId: prepared.match?.product.id ?? (keepPriorMatch ? candidate.original!.productId : null),
+              variantId: prepared.match?.id ?? (keepPriorMatch ? candidate.original!.variantId : null),
+              inventoryItemId: prepared.match?.inventoryItem.id ?? (keepPriorMatch ? candidate.original!.inventoryItemId : null),
+              expectedQuantity: prepared.match ? prepared.expectedQuantity : keepPriorMatch ? candidate.original!.expectedQuantity : prepared.expectedQuantity,
+              matchedProductTitle: prepared.match?.product.title ?? (keepPriorMatch ? candidate.original!.matchedProductTitle : null),
+              matchedVariantTitle: prepared.match?.title ?? (keepPriorMatch ? candidate.original!.matchedVariantTitle : null),
+              errorCode: prepared.errorCode, errorDetail: prepared.errorDetail,
+            } });
+            if (updated.count !== 1) throw new Error("DRAFT_CONFLICT");
+          }
+        }
+        const actor = actorFromShopifySession(session);
+        await tx.activityLog.create({ data: {
+          id: randomUUID(), shop: session.shop, eventType: "IMPORT_DRAFT_LINE_EDITED", outcome: "SUCCEEDED",
+          actorType: actor.actorType, actorId: actor.actorId, importBatchId: batch.id, importLineId: lineId || null,
+          receiptCode: batch.receiptCode, summary: `${intent === "draftAddLine" ? "Added" : intent === "draftEditLine" ? "Updated" : "Removed"} an import draft line.`,
+          metadataJson: JSON.stringify({ intent }), sourceKey: `draft:${randomUUID()}`,
+        } });
+      });
+      return redirect(`/app/imports/history/${encodeURIComponent(batch.id)}?draft=${intent === "draftAddLine" ? "added" : intent === "draftEditLine" ? "updated" : "removed"}`);
+    } catch (error) {
+      return { error: error instanceof Error && error.message === "DRAFT_CONFLICT" ? "This draft changed or started processing in another tab. Refresh before continuing." : "The draft change could not be saved. No Shopify changes were made." } satisfies ActionData;
+    }
+  }
   if (intent === "verifyShopifyState") {
     const batchId = String(formData.get("batchId") ?? "");
     const batch = await prisma.importBatch.findFirst({
@@ -384,11 +548,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       include: { lines: { orderBy: { rowNumber: "asc" } } },
     });
     if (!batch) return { error: "This import receipt was not found in the authenticated store." } satisfies ActionData;
-    if (
-      batch.status === "PREVIEWED" &&
-      batch.lines.some((line) => line.status === "BLOCKED" || line.operationType === "BLOCKED")
-    ) {
-      return { error: "This preview has invalid or blocked rows. Correct the CSV and preview it again before merging." } satisfies ActionData;
+    const excludedLines = batch.lines.filter((line) => line.status === "BLOCKED" || line.operationType === "BLOCKED").length;
+    const eligibleLines = batch.lines.filter((line) => !["SUCCEEDED", "BLOCKED"].includes(line.status) && line.operationType !== "BLOCKED").length;
+    const completedResumeReplay = intent === "resume"
+      && batch.status === "COMPLETED"
+      && batch.lines.length > 0
+      && batch.lines.every((line) => line.status === "SUCCEEDED" && line.stage === "COMPLETED");
+    if ((eligibleLines === 0 && !completedResumeReplay)
+      || String(formData.get("confirmedCount") ?? "") !== String(eligibleLines)
+      || (excludedLines > 0 && formData.get("partialConfirmed") !== "yes")) {
+      return { error: "Confirm the current number of eligible rows and any excluded rows before merging." } satisfies ActionData;
     }
     const neededScopes = new Set(["read_products", "read_inventory", "read_locations", "write_inventory"]);
     const needsProductWrite = batch.lines.some(
@@ -420,6 +589,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return {
         error: "The selected location is not active and authorized for this authenticated Shopify store. No merge was started.",
       } satisfies ActionData;
+    }
+    if (completedResumeReplay) {
+      const replay = await mergeImportBatch({ shop: session.shop, batchId, admin, prisma });
+      if (replay.status !== "COMPLETED") {
+        return { error: "The completed import could not be safely replayed. Refresh to inspect its persisted status." } satisfies ActionData;
+      }
+      const actor = actorFromShopifySession(session);
+      const replayId = randomUUID();
+      await appendActivity({
+        shop: session.shop,
+        actor,
+        eventType: "IMPORT_RESUME",
+        outcome: "SUCCEEDED",
+        importBatchId: batch.id,
+        receiptCode: batch.receiptCode,
+        attemptId: replayId,
+        sourceKey: `attempt:${replayId}:replay`,
+        summary: `Resume replay confirmed ${batch.receiptCode} was already complete; no Shopify changes were made.`,
+        metadata: { replayed: true, lineCount: replay.lines.length, status: replay.status },
+      }, prisma);
+      return redirect(`/app/imports/history/${encodeURIComponent(batchId)}`);
     }
     const attemptId = randomUUID();
     const actor = actorFromShopifySession(session);
@@ -762,6 +952,7 @@ export default function Imports() {
           <div className="stockhub-overview-eyebrow">StockHub imports</div>
           <h1>New import</h1>
           <p>Validate a stock CSV against an active Shopify location before you review and confirm its merge.</p>
+          <p><Link to="/app/imports/catalog">Import a Product Catalog CSV</Link> — a separate draft workflow that does not update Shopify.</p>
         </div>
       </header>
       <div className="stockhub-hero-panel stockhub-import-workflow"><s-section>

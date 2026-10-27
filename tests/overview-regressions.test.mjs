@@ -24,7 +24,8 @@ test("Overview import KPIs and recent activity are bounded and scoped to the aut
     "the route must render the production dashboard component with live loader data");
   assert.match(view, />Import batches</);
   assert.match(view, />Needs attention</);
-  assert.match(view, /Failed or uncertain imports/);
+  assert.match(view, /failed, uncertain or partial imports/);
+  assert.match(view, /stockhub-overview-attention/);
   assert.match(view, />Recent imports</);
   assert.match(view, />At a glance</);
   assert.match(view, /data\.shop\.name[\s\S]*?data\.shop\.myshopifyDomain/,
@@ -73,11 +74,12 @@ test("Overview status aggregation handles empty, failed, mixed, and unknown stat
     { status: "COMPLETED", _count: { _all: 4 } },
     { status: "FAILED", _count: { _all: 2 } },
     { status: "UNCERTAIN", _count: { _all: 3 } },
+    { status: "PARTIAL", _count: { _all: 2 } },
     { status: "RUNNING", _count: { _all: 1 } },
-  ]), { batchCount: 10, attentionBatchCount: 5 });
+  ]), { batchCount: 12, attentionBatchCount: 7 });
   assert.deepEqual(summarizeImportBatchStatusCounts([
     { status: "FUTURE_STATUS", _count: { _all: 5 } },
     { status: "failed", _count: { _all: 2 } },
   ]), { batchCount: 7, attentionBatchCount: 0 },
-  "unknown and differently-cased statuses contribute to total but are not exact FAILED or UNCERTAIN");
+  "unknown and differently-cased statuses contribute to total but not attention counts");
 });

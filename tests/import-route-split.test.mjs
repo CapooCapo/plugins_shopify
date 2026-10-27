@@ -134,7 +134,15 @@ test("FAILED remains Failed, and Verify is explicit, read-only, and routed to it
   assert.doesNotMatch(confirmedProductCount, /\["UNCERTAIN",\s*"RUNNING"\]/,
     "later line uncertainty must not erase a confirmed product creation");
   assert.match(confirmedProductCount, /Boolean\(line\.productId\)/);
-  assert.match(detail, /Unresolved Draft product creation:\s*\{uncertainProductCreations\}/);
+  const unresolvedDraftSummaryStart = detail.indexOf('<tr><th scope="row">Unresolved Draft product creation</th>');
+  const unresolvedDraftSummaryEnd = detail.indexOf("</tr>", unresolvedDraftSummaryStart);
+  assert.ok(unresolvedDraftSummaryStart >= 0 && unresolvedDraftSummaryEnd > unresolvedDraftSummaryStart,
+    "the receipt summary table must show an Unresolved Draft product creation row");
+  const unresolvedDraftSummaryRow = detail.slice(unresolvedDraftSummaryStart, unresolvedDraftSummaryEnd);
+  assert.match(unresolvedDraftSummaryRow, /\{uncertainProductCreations\}/,
+    "the visible unresolved-Draft summary row must display the computed count");
+  assert.match(unresolvedDraftSummaryRow, /stockhub-receipt-summary-count--warning/,
+    "unresolved Draft creation counts must retain warning styling");
 
   assert.match(detail, /export\s*\{\s*action\s*\}\s*from\s*"\.\/app\.imports\._index"/,
     "detail route explicitly reuses the authenticated import action");
@@ -199,10 +207,12 @@ test("Merge UI scope and blocked-row gates match the action's resumable workflow
       "this resume stage continues into productVariantsBulkUpdate and must not be exempt from write_products");
   });
 
-  await t.test("blocked rows prevent initial Merge but do not suppress eligible Resume lines", () => {
-    assert.match(mergeAction, /batch\.status\s*===\s*"PREVIEWED"[\s\S]*?batch\.lines\.some\(\(line\)\s*=>\s*line\.status\s*===\s*"BLOCKED"\s*\|\|\s*line\.operationType\s*===\s*"BLOCKED"\)/,
-      "the server must continue rejecting a PREVIEWED batch containing blocked rows");
-    assert.match(mergeDisabled, /batch\.status\s*===\s*"PREVIEWED"[\s\S]*?blocked\s*>\s*0|blocked\s*>\s*0[\s\S]*?batch\.status\s*===\s*"PREVIEWED"/,
-      "the UI should disable Merge for blocked previews but allow Resume to process other eligible lines");
+  await t.test("blocked rows require explicit partial confirmation and stay excluded from processing", () => {
+    assert.match(mergeAction, /const excludedLines = batch\.lines\.filter/);
+    assert.match(mergeAction, /const eligibleLines = batch\.lines\.filter/);
+    assert.match(mergeAction, /formData\.get\("partialConfirmed"\) !== "yes"/,
+      "the server must require explicit partial-import confirmation when blocked rows exist");
+    assert.doesNotMatch(mergeDisabled, /blocked\s*>\s*0/,
+      "eligible rows can be merged while blocked rows remain excluded");
   });
 });

@@ -1,0 +1,12 @@
+{
+  "cards": 3,
+  "reasons": [
+    "Suggested because normalized Product Name matches “Áo khoác mùa đông”. Review the rows and explicitly accept this group.",
+    "Suggested because normalized Product Name matches “Túi vải canvas”. Review the rows and explicitly accept this group.",
+    "Suggested because normalized Product Name matches “Váy linen dài”. Review the rows and explicitly accept this group."
+  ],
+  "mobileCards": 3,
+  "mobileDisplay": "grid",
+  "pageWidth": 390,
+  "viewport": 390
+}

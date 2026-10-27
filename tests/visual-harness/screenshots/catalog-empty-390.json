@@ -1,0 +1,5 @@
+{
+  "ready": "true",
+  "metrics": "{\"viewport\":{\"width\":390,\"height\":900},\"documentWidth\":390,\"bodyWidth\":390,\"page\":{\"x\":0,\"y\":0,\"width\":0,\"height\":0},\"content\":null,\"header\":null,\"cards\":[],\"quickActions\":null,\"recentImports\":null,\"primaryActionCount\":0,\"quickActionLinkCount\":0,\"polarisPageDefined\":true,\"polarisButtonDefined\":true,\"products\":null,\"newImport\":null,\"catalog\":{\"route\":\"/app/imports/catalog\",\"pageWidth\":390,\"tableRegions\":[],\"fieldCount\":0,\"fieldRects\":[],\"rowCardCount\":0,\"rowStatuses\":[],\"zeroConfirmationCount\":0,\"fileInput\":true,\"previewButton\":false,\"shopifyMutationCalls\":0},\"receiptActions\":null}",
+  "body": "STOCKHUB IMPORTS · PRODUCT CATALOG\nCatalog CSV drafts\n\nMap supplier columns and review catalog data. Drafts are not sent to Shopify.\n\nStore: example-outfitters.myshopify.com · Inventory Update remains a separate workflow.\n\nRequired fields: Product Name and SKU. Price is optional in a draft. Quantity is not part of catalog imports.\n\nCSV file (maximum 1,000,000 bytes)\n Upload and map columns\n\nNo catalog drafts yet."
+}
