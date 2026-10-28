@@ -2,11 +2,24 @@ import { spawnSync } from "node:child_process";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import process from "node:process";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const sourceSchemaPath = resolve(root, "prisma/schema.prisma");
 const testSchemaPath = resolve(root, "prisma/.schema.test.prisma");
 const prismaCli = resolve(root, "node_modules/.bin/prisma");
+
+// If PostgreSQL-gated specs are enabled, prove that both URL variables point
+// to the isolated local test database before any test process can connect.
+if (process.env.STOCKHUB_TEST_DATABASE_URL) {
+  const guard = spawnSync(process.execPath, [resolve(root, "scripts/postgres-test-guard.mjs"), "verify"], {
+    cwd: root,
+    env: process.env,
+    stdio: "inherit",
+  });
+  if (guard.error) throw guard.error;
+  if (guard.status !== 0) process.exit(guard.status ?? 1);
+}
 
 function rewriteModelNativeTypes(schema, modelName, replacements) {
   const modelPattern = new RegExp(`(model ${modelName} \\{[\\s\\S]*?\\n\\})`);
@@ -32,8 +45,11 @@ let testSchema = sourceSchema
 testSchema = rewriteModelNativeTypes(testSchema, "CatalogImportBatch", [["@db.Text", "", 1]]);
 testSchema = rewriteModelNativeTypes(testSchema, "CatalogImportLine", [["@db.Decimal(20, 6)", "", 1], ["@db.Text", "", 1]]);
 testSchema = rewriteModelNativeTypes(testSchema, "CatalogImportGroup", [["@db.Text", "", 1]]);
+testSchema = rewriteModelNativeTypes(testSchema, "CatalogExecutionOperation", [["@db.Text", "", 1]]);
+testSchema = rewriteModelNativeTypes(testSchema, "CatalogExecutionItem", [["@db.Text", "", 1]]);
+testSchema = rewriteModelNativeTypes(testSchema, "CatalogExecutionAttempt", [["@db.Text", "", 1]]);
 
-for (const modelName of ["CatalogImportBatch", "CatalogImportLine", "CatalogImportGroup"]) {
+for (const modelName of ["CatalogImportBatch", "CatalogImportLine", "CatalogImportGroup", "CatalogImportReview", "CatalogExecutionOperation", "CatalogExecutionItem", "CatalogExecutionAttempt"]) {
   const modelPattern = new RegExp(`(model ${modelName} \\{[\\s\\S]*?\\n\\})`);
   const model = testSchema.match(modelPattern)?.[1];
   if (!model) throw new Error(`Could not find ${modelName} in the derived SQLite test schema`);

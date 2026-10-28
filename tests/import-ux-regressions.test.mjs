@@ -227,3 +227,114 @@ test("New Import presents a safe upload-to-receipt workflow without adding merge
   assert.doesNotMatch(imports.slice(imports.indexOf("export default function Imports()")), /name="intent" value="merge"|name="intent" value="resume"/,
     "New Import must not introduce merge or resume controls");
 });
+
+test("receipt workspace keeps the table primary and uses one accessible product drawer for row CRUD", async () => {
+  const [detail, styles] = await Promise.all([
+    source("app.imports.history.$batchId.tsx"),
+    readFile(new URL("../app/styles/stockhub.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(detail, /className="stockhub-line-toolbar__summary"><strong>\{filteredLines\.length\}<\/strong><span>shown of \{batch\.lines\.length\}/,
+    "the current filtered count and receipt total must lead the line-item workspace");
+  assert.match(detail, /stockhub-line-toolbar__filters[\s\S]*?Search line items[\s\S]*?Quality status/,
+    "search and quality filters must share the consolidated line-item toolbar");
+  assert.match(detail, /<table className="stockhub-lines-table" aria-label="Receipt line items">[\s\S]*?<th scope="col">Product \/ Variant<\/th>[\s\S]*?<th scope="col">SKU<\/th>[\s\S]*?<th scope="col">Quantity<\/th>[\s\S]*?<th scope="col">\{executionStarted \? "Preview check" : "Validation"\}<\/th>[\s\S]*?<th scope="col">Execution status<\/th>[\s\S]*?stockhub-visually-hidden">Row actions/,
+    "desktop uses a named semantic table with product, SKU, quantity, validation, execution, and accessible action columns");
+  assert.match(detail, /<ul className="stockhub-mobile-lines" aria-label="Receipt line items">[\s\S]*?<article className="stockhub-mobile-line-card">[\s\S]*?stockhub-mobile-line-card__badges[\s\S]*?stockhub-mobile-line-card__actions/,
+    "mobile uses readable line cards instead of compressing the desktop table");
+  assert.match(detail, /onClick=\{\(\) => \{ setLineStatusFilter\("ERROR"\); setErrorGroupFilter\(group\.key\); setLineSearch\(""\); setLineTypeFilter\("ALL"\);/,
+    "a validation-group action clears incompatible search and operation filters before showing the issue group");
+  assert.match(detail, /Show \{group\.lines\.length\} affected rows/,
+    "the validation-group action count names the full selected issue group");
+  assert.match(detail, /className="stockhub-validation-issue-list__content"[\s\S]*?\{group\.label\}[\s\S]*?\{group\.hint\}/,
+    "each repeated validation issue group states its own cause and correction guidance");
+  assert.match(detail, /className="stockhub-row-open"[\s\S]*?openInspector\(line\.id, "details"/,
+    "clicking a product/variant must open the same product details surface");
+  assert.match(detail, /className="stockhub-row-inspector" role="dialog" aria-modal="true"/,
+    "the inspector must use modal drawer semantics when opened");
+  assert.match(detail, /event\.key === "Escape"[\s\S]*?requestCloseInspector\(\)/,
+    "the product drawer must close through Escape");
+  assert.match(styles, /\.stockhub-row-inspector\s*\{[^}]*position:\s*fixed[^}]*width:\s*min\(500px/s,
+    "desktop drawer must be fixed to the right edge instead of consuming permanent table width");
+  assert.match(styles, /@media \(max-width: 600px\)[\s\S]*?\.stockhub-row-inspector\s*\{[^}]*width:\s*100vw/s,
+    "mobile drawer must use the full viewport width");
+  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.stockhub-lines-table-wrap\s*\{\s*display:\s*none;\s*\}[\s\S]*?\.stockhub-mobile-lines\s*\{\s*display:\s*grid/s,
+    "the responsive breakpoint hides the semantic desktop table and displays mobile row cards");
+});
+
+test("draft editing gives truthful pending, conflict, close, and safe product-draft feedback", async () => {
+  const detail = await source("app.imports.history.$batchId.tsx");
+
+  assert.match(detail, /savingDraft \? "Saving…"[\s\S]*?Save and revalidate/,
+    "save must show a pending state rather than claim success early");
+  assert.match(detail, /draftNotice[\s\S]*?setSelectedLineId\(null\)[\s\S]*?stockhub-toast/,
+    "the success redirect must close the drawer and show a visible toast");
+  assert.match(detail, /draftSaveInFlightRef[\s\S]*?savingDraft[\s\S]*?setSelectedLineId\(null\)/,
+    "a later save to the same redirect URL must still close the reopened drawer");
+  assert.match(detail, /draftConflict[\s\S]*?Refresh draft/,
+    "a stale draft conflict must be surfaced with an explicit refresh path");
+  assert.match(detail, /Discard unsaved changes\?[\s\S]*?Discard changes[\s\S]*?Keep editing/,
+    "closing a dirty form must require an explicit discard decision");
+  assert.match(detail, /Prepare product draft in Product Catalog[\s\S]*?does not create a Shopify product/,
+    "missing-SKU guidance must route to the draft-only catalog workflow");
+  assert.match(detail, /INVENTORY_NOT_TRACKED[\s\S]*?do not create another product[\s\S]*?Shopify Admin/i,
+    "untracked existing variants must direct merchants to safe review instead of duplicate creation");
+  assert.match(detail, /name="confirmedCount" value=\{eligibleCount\}/,
+    "the existing merge confirmation count contract must remain intact");
+});
+
+test("receipt revalidation reuses the guarded draft action and invalidates the open merge confirmation", async () => {
+  const detail = await source("app.imports.history.$batchId.tsx");
+  const toolbarActionsStart = detail.indexOf('<div className="stockhub-line-toolbar__actions">');
+  const toolbarActionsEnd = detail.indexOf('</div>\n            {errorGroupFilter', toolbarActionsStart);
+  const toolbarActions = detail.slice(toolbarActionsStart, toolbarActionsEnd);
+
+  assert.ok(toolbarActionsStart >= 0 && toolbarActionsEnd > toolbarActionsStart,
+    "the revalidation control remains in the line-item toolbar action area");
+  assert.match(toolbarActions, /name="intent" value="draftEditLine"[\s\S]*?name="expectedUpdatedAt" value=\{batch\.updatedAt\.toISOString\(\)\}[\s\S]*?name="image_url"/,
+    "revalidate must submit the existing version-guarded draft edit contract with all persisted CSV fields");
+  assert.match(toolbarActions, /onSubmit=\{\(\) => setMergeConfirmationRevision\(null\)\}/,
+    "revalidation must invalidate any client-side merge confirmation before the server refresh");
+  assert.match(detail, /className="stockhub-draft-form"[\s\S]*?onSubmit=\{\(\) => setMergeConfirmationRevision\(null\)\}/,
+    "editing a draft row must also invalidate any stale merge confirmation");
+  assert.match(toolbarActions, /disabled=\{!revalidationLine \|\| savingDraft\}[\s\S]*?Revalidate selected row/,
+    "revalidation is disabled until a draft row is selected and while it is saving");
+  assert.match(detail, /Select a draft row above to revalidate it/,
+    "the action area must explain why revalidation is disabled until a row is selected");
+  assert.match(detail, /Draft row saved and validation refreshed/,
+    "the redirect result must give specific validation-refresh feedback");
+});
+
+test("missing-SKU preparation posts CSV values into a draft-only catalog workflow", async () => {
+  const [detail, catalogIndex, catalogDetail] = await Promise.all([
+    source("app.imports.history.$batchId.tsx"),
+    source("app.imports.catalog._index.tsx"),
+    source("app.imports.catalog.$batchId.tsx"),
+  ]);
+
+  const preparation = detail.match(/selectedLine\.operationType === "CREATE_DRAFT" \? <s-banner[\s\S]*?<\/s-banner>/)?.[0] ?? "";
+  assert.match(preparation, /<Form method="post" action="\/app\/imports\/catalog">/,
+    "missing-SKU data must travel by POST, not a query string");
+  for (const name of ["productName", "sku", "price", "description", "imageUrl", "sourceReceiptCode", "sourceRowNumber"]) {
+    assert.match(preparation, new RegExp(`name="${name}"`), `${name} must be carried to the catalog draft`);
+  }
+  assert.doesNotMatch(preparation, /INVENTORY_NOT_TRACKED/,
+    "the product-draft affordance must not be used for an existing untracked variant");
+  assert.match(catalogIndex, /form\.get\("intent"\) === "prepare-import-draft"[\s\S]*?status: "DRAFT"[\s\S]*?catalogImportLine\.create/,
+    "catalog intake must create a local DRAFT row only after the authenticated POST");
+  assert.doesNotMatch(catalogIndex, /prepare-import-draft[\s\S]{0,2000}admin\.graphql/,
+    "preparing a catalog draft must not call Shopify");
+  assert.match(catalogDetail, /prepared === "inventory"[\s\S]*?does not create a Shopify product/,
+    "the destination draft must disclose its safe, non-executing state");
+});
+
+test("drawer focus starts on a native control and traps Polaris focus hosts", async () => {
+  const detail = await source("app.imports.history.$batchId.tsx");
+
+  assert.match(detail, /const drawerCloseRef = useRef<HTMLButtonElement>/,
+    "drawer focus must start from a native close button rather than a non-tabbable heading");
+  assert.match(detail, /drawerCloseRef\.current\?\.focus\(\)/,
+    "opening the drawer must focus its close control");
+  assert.match(detail, /s-button:not\(\[disabled\]\), s-text-field:not\(\[disabled\]\), s-select:not\(\[disabled\]\)/,
+    "the Tab cycle must include Polaris custom-element focus hosts");
+});

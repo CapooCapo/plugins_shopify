@@ -66,9 +66,10 @@ test("Import History uses a truthful legacy receipt fallback and keeps line outc
   assert.match(source, /receiptCodeLabel\(batch\.receiptCode\)/,
     "Import History must apply the presentation fallback to legacy rows");
   assert.match(source, /rowCount/);
-  assert.match(detail, /Import progress summary/);
-  assert.match(detail, /Unresolved Draft product creation/);
-  assert.match(detail, /scope="row">Failed<\/th>[\s\S]*?\{failed\}[\s\S]*?scope="row">Blocked<\/th>[\s\S]*?\{blocked\}[\s\S]*?scope="row">Uncertain<\/th>[\s\S]*?\{uncertain\}/);
+  assert.match(detail, /Confirmed Shopify operations/);
+  assert.match(detail, /uncertainProductCreations > 0 \? <span className="is-warning"><strong>\{uncertainProductCreations\}<\/strong> unresolved product creations/);
+  assert.match(detail, /<strong>\{failed\}<\/strong> failed[\s\S]*?<strong>\{blocked\}<\/strong> blocked[\s\S]*?<strong>\{uncertain\}<\/strong> uncertain or in progress/);
+  assert.match(detail, /Import lines completed[\s\S]*?Draft products created[\s\S]*?New-product inventory activations[\s\S]*?Existing SKU inventory adjustments/);
 });
 
 test("Import History explains progress for created, failed, and completed lines", async () => {

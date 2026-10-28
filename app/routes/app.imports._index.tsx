@@ -12,7 +12,7 @@ import {
   useLoaderData,
   useNavigation,
 } from "react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -938,7 +938,18 @@ export default function Imports() {
   const navigation = useNavigation();
   const { setNewImportDirty } = useImportDirtyContext();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedLocationId, setSelectedLocationId] = useState("");
+  const [duplicateConfirmation, setDuplicateConfirmation] = useState<{ file: File; locationId: string } | null>(null);
+  const submittedSelectionRef = useRef<{ file: File | null; locationId: string; version: number } | null>(null);
+  const selectionVersionRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
+  const duplicateConfirmationValid = Boolean(actionData?.duplicateImport && duplicateConfirmation && selectedFile && duplicateConfirmation.file === selectedFile && duplicateConfirmation.locationId === selectedLocationId);
+  useEffect(() => {
+    if (!actionData?.duplicateImport) return;
+    const submitted = submittedSelectionRef.current;
+    if (!submitted?.file || !submitted.locationId || submitted.version !== selectionVersionRef.current) return;
+    setDuplicateConfirmation({ file: submitted.file, locationId: submitted.locationId });
+  }, [actionData?.duplicateImport]);
   const isSubmitting = navigation.state === "submitting";
   const previewDisabled =
     isSubmitting ||
@@ -947,6 +958,11 @@ export default function Imports() {
     data.missingReadScopes.length > 0 ||
     data.missingLocationScopes.length > 0 ||
     data.locationStatus !== "ready";
+
+  function invalidateDuplicateConfirmation() {
+    selectionVersionRef.current += 1;
+    setDuplicateConfirmation(null);
+  }
 
   function updateNewImportDirty(form: HTMLFormElement | null) {
     const file = form?.querySelector<HTMLInputElement>('input[type="file"]');
@@ -982,10 +998,11 @@ export default function Imports() {
             <Form method="post" encType="multipart/form-data" data-import-preview-form="true"
               id="import-preview-form"
               aria-describedby={actionData?.error || actionData?.authorizationError ? "import-action-error" : undefined}
-              onChange={(event) => updateNewImportDirty(event.currentTarget)}>
+              onChange={(event) => { invalidateDuplicateConfirmation(); setSelectedLocationId(event.currentTarget.querySelector<HTMLSelectElement>('select[name="locationId"]')?.value ?? ""); updateNewImportDirty(event.currentTarget); }}
+              onSubmit={() => { submittedSelectionRef.current = { file: selectedFile, locationId: selectedLocationId, version: selectionVersionRef.current }; }}>
               <input type="hidden" name="intent" value="preview" />
               <input type="hidden" name="submissionId" value={data.submissionId} />
-              {actionData?.duplicateImport ? <input type="hidden" name="duplicateConfirmed" value="yes" /> : null}
+              {duplicateConfirmationValid ? <input type="hidden" name="duplicateConfirmed" value="yes" /> : null}
               <s-stack direction="block" gap="base">
                 <div className="stockhub-destination-badge">
                   <s-text type="strong">Import destination</s-text>
@@ -1015,6 +1032,7 @@ export default function Imports() {
                       setIsDragging(false);
                       const file = e.dataTransfer.files?.[0];
                       if (file) {
+                        invalidateDuplicateConfirmation();
                         setSelectedFile(file);
                         const input = document.getElementById("csv-file") as HTMLInputElement;
                         if (input) {
@@ -1072,6 +1090,7 @@ export default function Imports() {
                           type="button"
                           className="stockhub-file-card-remove"
                           onClick={() => {
+                            invalidateDuplicateConfirmation();
                             setSelectedFile(null);
                             const input = document.getElementById("csv-file") as HTMLInputElement;
                             if (input) {
@@ -1090,7 +1109,7 @@ export default function Imports() {
                 </div>
 
                 <div className="stockhub-import-actions">
-                  <s-button type="submit" variant="primary" disabled={previewDisabled}>{isSubmitting ? "Validating CSV…" : actionData?.duplicateImport ? "Confirm separate stock receipt" : "Validate and create preview receipt"}</s-button>
+                  <s-button type="submit" variant="primary" disabled={previewDisabled}>{isSubmitting ? "Validating CSV…" : duplicateConfirmationValid ? "Confirm separate stock receipt" : "Validate and create preview receipt"}</s-button>
                 </div>
               </s-stack>
             </Form>
@@ -1132,7 +1151,7 @@ export default function Imports() {
             <s-banner tone="critical">{actionData.authorizationError ?? actionData.error}</s-banner>
           </div>
         ) : null}
-        {actionData?.duplicateImport ? (
+        {duplicateConfirmationValid && actionData?.duplicateImport ? (
           <s-banner tone="warning">
             <s-heading>Duplicate CSV Detected</s-heading>
             This file has already been uploaded to StockHub as receipt <Link to={`/app/imports/history/${encodeURIComponent(actionData.duplicateImport.batchId)}`}>{actionData.duplicateImport.receiptCode}</Link> ({actionData.duplicateImport.status}, {actionData.duplicateImport.locationName}). No duplicate batch was created.

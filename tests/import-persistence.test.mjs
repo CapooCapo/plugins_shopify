@@ -66,10 +66,10 @@ test("receipt code is visible after preview, in merge confirmation, and in histo
   ]);
 
   assert.match(history, /function\s+receiptCodeLabel\s*\([^)]*\)\s*\{[\s\S]*?receiptCode\?\.trim\(\)\s*\|\|\s*["'`]No receipt code recorded \(legacy batch\)["'`]/);
-  assert.match(detail, /Receipt\s*\{batch\.receiptCode\}/,
-    "the receipt detail heading must display its saved receipt code");
-  assert.match(detail, /role="dialog" aria-label="Confirm inventory merge"[\s\S]*?receipt \{batch\.receiptCode\}/,
-    "the explicit merge dialog must identify the receipt before Shopify writes begin");
+  assert.match(detail, /stockhub-receipt-eyebrow">Import receipt<\/span><s-heading>\{batch\.receiptCode\}<\/s-heading>/,
+    "the compact receipt header must display the saved receipt code");
+  assert.match(detail, /role="dialog" aria-label=\{`Confirm \$\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}`\}[\s\S]*?receipt \{batch\.receiptCode\}/,
+    "the explicit merge/resume dialog must identify the receipt before Shopify writes begin");
   assert.match(route, /return redirect\(`\/app\/imports\/history\/\$\{encodeURIComponent\(persisted\.batchId\)\}/,
     "a saved preview opens the receipt detail page that displays its generated code");
   assert.match(route, /Duplicate CSV Detected/);
@@ -105,6 +105,6 @@ test("merge still requires explicit confirmation and checks store-derived permis
   assert.match(route, /where:\s*\{\s*id:\s*batchId,\s*shop:\s*session\.shop\s*\}/);
   assert.match(route, /const\s+neededScopes\s*=\s*new\s+Set\(\["read_products",\s*"read_inventory",\s*"read_locations",\s*"write_inventory"\]\)/);
   assert.match(route, /neededScopes\.add\("write_products"\)/);
-  assert.match(detail, /role="dialog" aria-label="Confirm inventory merge"/);
+  assert.match(detail, /role="dialog" aria-label=\{`Confirm \$\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}`\}/);
   assert.match(detail, /name="confirmed" value="yes"/);
 });

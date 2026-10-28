@@ -134,15 +134,10 @@ test("FAILED remains Failed, and Verify is explicit, read-only, and routed to it
   assert.doesNotMatch(confirmedProductCount, /\["UNCERTAIN",\s*"RUNNING"\]/,
     "later line uncertainty must not erase a confirmed product creation");
   assert.match(confirmedProductCount, /Boolean\(line\.productId\)/);
-  const unresolvedDraftSummaryStart = detail.indexOf('<tr><th scope="row">Unresolved Draft product creation</th>');
-  const unresolvedDraftSummaryEnd = detail.indexOf("</tr>", unresolvedDraftSummaryStart);
-  assert.ok(unresolvedDraftSummaryStart >= 0 && unresolvedDraftSummaryEnd > unresolvedDraftSummaryStart,
-    "the receipt summary table must show an Unresolved Draft product creation row");
-  const unresolvedDraftSummaryRow = detail.slice(unresolvedDraftSummaryStart, unresolvedDraftSummaryEnd);
-  assert.match(unresolvedDraftSummaryRow, /\{uncertainProductCreations\}/,
-    "the visible unresolved-Draft summary row must display the computed count");
-  assert.match(unresolvedDraftSummaryRow, /stockhub-receipt-summary-count--warning/,
-    "unresolved Draft creation counts must retain warning styling");
+  assert.match(detail, /uncertainProductCreations > 0 \? <span className="is-warning"><strong>\{uncertainProductCreations\}<\/strong> unresolved product creations/,
+    "confirmed/uncertain operation details should surface unresolved Draft creation with a contextual warning tone");
+  assert.match(detail, /stockhub-receipt-summary-cards/,
+    "persisted receipt counts are rendered as summary cards rather than a dense metric table");
 
   assert.match(detail, /export\s*\{\s*action\s*\}\s*from\s*"\.\/app\.imports\._index"/,
     "detail route explicitly reuses the authenticated import action");

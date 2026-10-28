@@ -303,7 +303,10 @@ test("catalog product groups persist as unconfirmed proposals with scoped accept
 test("catalog Shopify comparison is shop-scoped, version-checked, paginated read-only, and never eligible for writes", { skip: !databaseUrl }, async (t) => {
   const shop = `catalog-compare-${crypto.randomUUID()}.myshopify.com`;
   const { prisma, calls, indexAction, detailAction } = await setup(t, shop);
-  t.after(async () => prisma.catalogImportBatch.deleteMany({ where: { shop } }));
+  t.after(async () => {
+    await prisma.catalogImportReview.deleteMany({ where: { shop } });
+    await prisma.catalogImportBatch.deleteMany({ where: { shop } });
+  });
   let graphqlCalls = 0;
   let mutateDuringRead = false;
   const graphql = async (query, options) => {

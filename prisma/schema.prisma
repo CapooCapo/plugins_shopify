@@ -379,8 +379,10 @@ model CatalogImportLine {
   updatedAt          DateTime           @updatedAt
   batch              CatalogImportBatch @relation(fields: [shop, batchId], references: [shop, id], onDelete: Cascade)
   group              CatalogImportGroup? @relation(fields: [shop, batchId, groupId], references: [shop, batchId, id], onDelete: NoAction)
+  executionItems     CatalogExecutionItem[]
 
   @@unique([shop, id])
+  @@unique([shop, batchId, id])
   @@unique([batchId, rowNumber])
   @@index([shop, batchId, status, rowNumber])
   @@index([shop, batchId, groupId])
@@ -401,7 +403,146 @@ model CatalogImportGroup {
   updatedAt       DateTime           @updatedAt
   batch           CatalogImportBatch @relation(fields: [shop, batchId], references: [shop, id], onDelete: Cascade)
   lines           CatalogImportLine[]
+  reviewRecords   CatalogImportReview[]
+  reviewHistory   CatalogImportReviewHistory[]
+  executionOperations CatalogExecutionOperation[]
 
   @@unique([shop, batchId, id])
   @@index([shop, batchId, state, createdAt])
+}
+
+model CatalogImportReview {
+  id                  String             @id
+  shop                String
+  batchId             String
+  groupId             String
+  draftVersion        Int
+  reviewVersion       Int                @default(0)
+  operation           String
+  status              String             @default("PENDING")
+  snapshotFingerprint String
+  snapshot            Json
+  shopifyProductId    String?
+  matchedVariantIds   Json
+  decisions           Json
+  snapshotCapturedAt  DateTime           @default(now())
+  reviewedAt          DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  group               CatalogImportGroup @relation(fields: [shop, batchId, groupId], references: [shop, batchId, id], onDelete: Restrict)
+  executionOperations CatalogExecutionOperation[]
+
+  @@unique([shop, batchId, groupId, draftVersion])
+  @@unique([shop, batchId, id])
+  @@unique([shop, batchId, groupId, id])
+  @@index([shop, batchId, draftVersion, status])
+  @@index([shop, shopifyProductId])
+}
+
+model CatalogImportReviewHistory {
+  id                  String
+  shop                String
+  batchId             String
+  groupId             String
+  draftVersion        Int
+  reviewVersion       Int
+  operation           String
+  status              String
+  snapshotFingerprint String
+  snapshot            Json
+  shopifyProductId    String?
+  matchedVariantIds   Json
+  decisions           Json
+  snapshotCapturedAt  DateTime
+  reviewedAt          DateTime?
+  createdAt           DateTime
+  updatedAt           DateTime
+  archivedAt          DateTime           @default(now())
+  group               CatalogImportGroup @relation(fields: [shop, batchId, groupId], references: [shop, batchId, id], onDelete: Restrict)
+
+  @@id([id, reviewVersion])
+  @@index([shop, batchId, groupId, draftVersion, archivedAt])
+  @@index([shop, snapshotFingerprint])
+}
+
+model CatalogExecutionOperation {
+  id                  String                    @id
+  shop                String
+  batchId             String
+  groupId             String
+  reviewId            String
+  draftVersion        Int
+  reviewVersion       Int
+  snapshotFingerprint String
+  idempotencyKey      String
+  plan                String
+  status              String                    @default("READY")
+  claimToken          String?
+  claimExpiresAt      DateTime?
+  productId           String?
+  planJson            Json
+  result              Json?
+  errorCode           String?
+  errorDetail         String?                   @db.Text
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  completedAt         DateTime?
+  group               CatalogImportGroup        @relation(fields: [shop, batchId, groupId], references: [shop, batchId, id], onDelete: Restrict)
+  review              CatalogImportReview       @relation(fields: [shop, batchId, groupId, reviewId], references: [shop, batchId, groupId, id], onDelete: Restrict, onUpdate: Restrict)
+  items               CatalogExecutionItem[]
+  attempts            CatalogExecutionAttempt[]
+
+  @@unique([shop, id])
+  @@unique([shop, batchId, id])
+  @@unique([shop, reviewId, reviewVersion])
+  @@unique([shop, idempotencyKey])
+  @@index([shop, batchId, groupId, createdAt])
+  @@index([shop, status, updatedAt])
+}
+
+model CatalogExecutionItem {
+  id             String                    @id
+  shop           String
+  batchId        String
+  operationId    String
+  lineId         String
+  plan           String
+  status         String                    @default("READY")
+  productId      String?
+  variantId      String?
+  approvedFields Json
+  idempotencyKey String
+  errorCode      String?
+  errorDetail    String?                   @db.Text
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  operation      CatalogExecutionOperation @relation(fields: [shop, batchId, operationId], references: [shop, batchId, id], onDelete: Restrict)
+  line           CatalogImportLine         @relation(fields: [shop, batchId, lineId], references: [shop, batchId, id], onDelete: Restrict)
+  attempts       CatalogExecutionAttempt[]
+
+  @@unique([shop, operationId, id])
+  @@unique([shop, operationId, lineId])
+  @@unique([shop, idempotencyKey])
+  @@index([shop, batchId, status])
+}
+
+model CatalogExecutionAttempt {
+  id          String                    @id
+  shop        String
+  operationId String
+  itemId      String?
+  mutation    String
+  status      String                    @default("PREPARED")
+  claimToken  String?
+  requestHash String
+  errorCode   String?
+  detail      String?                   @db.Text
+  startedAt   DateTime                  @default(now())
+  finishedAt  DateTime?
+  operation   CatalogExecutionOperation @relation(fields: [shop, operationId], references: [shop, id], onDelete: Restrict)
+  item        CatalogExecutionItem?     @relation(fields: [shop, operationId, itemId], references: [shop, operationId, id], onDelete: Restrict)
+
+  @@unique([shop, id])
+  @@index([shop, operationId, startedAt])
+  @@index([shop, status, startedAt])
 }

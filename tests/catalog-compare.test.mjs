@@ -43,12 +43,12 @@ test("duplicate Shopify SKUs, matches across products, and ambiguous title ident
   assert.equal(title.disposition, "CONFLICT");
 });
 
-test("new Size/Color combination on an existing product is proposed for explicit review without deletion", () => {
+test("new Size/Color combination on an existing product is a conflict before review confirmation", () => {
   const input = [row(), row({ id: "line-2", sku: "S-2", size: "L" })];
   const result = compareCatalogGroups(input, [shopifyVariant()])[0];
-  assert.equal(result.disposition, "UPDATE");
+  assert.equal(result.disposition, "CONFLICT");
   assert.equal(result.variantId, null);
-  assert.match(result.reason, /new Size\/Color combination/);
+  assert.match(result.reason, /new Size\/Color combination.*cannot add variants to existing products/i);
   assert.equal(result.eligible, false);
   const duplicateCombination = compareCatalogGroups([row(), row({ id: "line-2", sku: "S-2", size: "M" })], [shopifyVariant()])[0];
   assert.equal(duplicateCombination.disposition, "CONFLICT", "new SKU cannot duplicate an existing Size/Color combination");
