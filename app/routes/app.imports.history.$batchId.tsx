@@ -85,20 +85,138 @@ function validationGroup(line: { status: string; operationType: string; errorCod
   return "ERROR";
 }
 
+function validationPresentation(
+  line: { status: string; operationType: string; errorCode: string | null; errorDetail: string | null },
+  executionStarted: boolean,
+) {
+  if (executionStarted) {
+    return line.operationType === "BLOCKED"
+      ? { label: "Blocked in preview", tone: "warning" as const }
+      : { label: "Passed preview", tone: "success" as const };
+  }
+  const group = validationGroup(line);
+  if (group === "READY") return { label: "Ready", tone: "success" as const };
+  if (group === "MISSING") return { label: "Missing info", tone: "warning" as const };
+  return { label: "Error", tone: "critical" as const };
+}
+
 function correctionHint(errorCode: string | null) {
   if (errorCode === "CSV_INVALID_ROW") return "Correct the CSV field identified above, then save the row to validate it again.";
   if (errorCode === "NEW_PRODUCT_FIELDS_MISSING") return "Add a product title and price for this new SKU, then save the row.";
   if (errorCode === "SKU_AMBIGUOUS") return "Use a SKU that identifies exactly one variant in Shopify.";
   if (errorCode === "SKU_LOOKUP_INCOMPLETE") return "Retry after Shopify product/location reads are available, or correct the SKU.";
-  if (errorCode === "INVENTORY_NOT_TRACKED") return "Enable inventory tracking in Shopify or use a tracked variant.";
+  if (errorCode === "INVENTORY_NOT_TRACKED") return "If this variant should be stocked, enable inventory tracking in Shopify Admin (Track quantity), then revalidate this row.";
   if (errorCode === "LOCATION_NOT_STOCKED") return "Stock this variant at the selected location in Shopify, then validate again.";
   return "Review the row and selected Shopify location, correct the source data, then validate again.";
+}
+
+function validationIssueKey(line: { errorCode: string | null; errorDetail: string | null }) {
+  const normalizedDetail = (line.errorDetail ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const normalizedCode = line.errorCode?.trim().toUpperCase();
+  if (normalizedCode || normalizedDetail) {
+    return `code:${normalizedCode || "unspecified"}|detail:${normalizedDetail || "unspecified validation issue"}`;
+  }
+  return "code:unspecified|detail:unspecified validation issue";
+}
+
+function validationIssueLabel(line: { errorCode: string | null; errorDetail: string | null }) {
+  if (line.errorDetail?.trim()) return line.errorDetail.trim();
+  return line.errorCode?.trim().replaceAll("_", " ").toLowerCase() || "Validation needs review";
 }
 
 function verificationClassificationLabel(classification: string) {
   return classification === "SAFE_CANDIDATE" ? "Safe candidate"
     : classification === "BLOCKED" ? "Blocked"
       : classification === "UNCERTAIN" ? "Uncertain" : classification;
+}
+
+type ReceiptProgressLine = {
+  status: string;
+  operationType: string;
+  stage: string;
+  productId: string | null;
+  errorCode: string | null;
+};
+
+export function summarizeReceiptProgress(lines: ReceiptProgressLine[]) {
+  const successful = lines.filter((line) => line.status === "SUCCEEDED").length;
+  const failed = lines.filter((line) => line.status === "FAILED").length;
+  const blocked = lines.filter((line) => line.status === "BLOCKED" || line.operationType === "BLOCKED").length;
+  const uncertain = lines.filter((line) => line.status === "UNCERTAIN" || line.status === "RUNNING").length;
+  const confirmedProductStages = new Set([
+    "PRODUCT_CREATED", "INVENTORY_ITEM_CONFIGURING", "INVENTORY_ITEM_CONFIGURED",
+    "VARIANT_PRICE_CONFIGURING", "VARIANT_PRICE_CONFIGURED", "INVENTORY_ACTIVATING",
+    "INVENTORY_ACTIVE", "COMPLETED",
+  ]);
+  const confirmedProductsCreated = lines.filter((line) =>
+    line.operationType === "CREATE_DRAFT" && Boolean(line.productId) && confirmedProductStages.has(line.stage),
+  ).length;
+  const uncertainProductCreations = lines.filter((line) =>
+    line.operationType === "CREATE_DRAFT" && (line.errorCode === "PRODUCT_CREATE_UNCERTAIN" ||
+      (line.stage === "PRODUCT_CREATING" && ["UNCERTAIN", "RUNNING"].includes(line.status))),
+  ).length;
+  const confirmedInventoryActivated = lines.filter((line) =>
+    line.operationType === "CREATE_DRAFT" &&
+    (line.stage === "INVENTORY_ACTIVE" || (line.stage === "COMPLETED" && line.status === "SUCCEEDED")),
+  ).length;
+  const confirmedInventoryAdjustments = lines.filter((line) =>
+    line.operationType === "ADJUST" && line.status === "SUCCEEDED" && line.stage === "COMPLETED",
+  ).length;
+  const createdDraftInventoryFailures = lines.filter((line) =>
+    line.operationType === "CREATE_DRAFT" && Boolean(line.productId) && line.status === "FAILED" &&
+    (line.stage === "INVENTORY_ACTIVATING" || line.errorCode?.startsWith("INVENTORY_ACTIVATE_")),
+  ).length;
+  const eligibleCount = lines.filter((line) => !["SUCCEEDED", "BLOCKED"].includes(line.status) && line.operationType !== "BLOCKED").length;
+  return {
+    totalLines: lines.length,
+    successful,
+    completionPercent: lines.length > 0 ? Math.round((successful / lines.length) * 100) : 0,
+    failed,
+    blocked,
+    uncertain,
+    confirmedProductsCreated,
+    uncertainProductCreations,
+    confirmedInventoryActivated,
+    confirmedInventoryAdjustments,
+    createdDraftInventoryFailures,
+    eligibleCount,
+  };
+}
+
+export function noEligibleReceiptMessage(summary: Pick<ReturnType<typeof summarizeReceiptProgress>,
+  "totalLines" | "successful" | "failed" | "blocked" | "uncertain">, context: {
+    batchStatus?: string;
+    executionStarted?: boolean;
+  } = {}) {
+  const unresolved = summary.failed + summary.blocked + summary.uncertain;
+  if (context.batchStatus === "PREVIEWED" && context.executionStarted === false) {
+    return {
+      title: "No rows are ready to merge",
+      detail: summary.blocked > 0 || summary.failed > 0
+        ? `${summary.blocked} row${summary.blocked === 1 ? " is" : "s are"} blocked by preview validation${summary.failed > 0 ? `; ${summary.failed} row${summary.failed === 1 ? " has" : "s have"} validation error${summary.failed === 1 ? "" : "s"}` : ""}. Review and correct the row details, then revalidate before merging.`
+        : "This preview has no rows ready for Merge. Review the row details, correct any validation issues, then revalidate.",
+      tone: unresolved > 0 ? "attention" as const : "neutral" as const,
+    };
+  }
+  if (summary.totalLines > 0 && summary.successful === summary.totalLines && unresolved === 0) {
+    return {
+      title: "Import lines complete",
+      detail: `All ${summary.totalLines} import lines completed. No lines remain eligible to merge or resume. Product creation and inventory stages are listed separately above.`,
+      tone: "success" as const,
+    };
+  }
+  if (unresolved > 0) {
+    return {
+      title: "No lines are eligible to resume",
+      detail: `${summary.failed} failed, ${summary.blocked} blocked, and ${summary.uncertain} uncertain or in-progress. Review the line details below and verify Shopify state before taking further action.`,
+      tone: "attention" as const,
+    };
+  }
+  return {
+    title: summary.totalLines === 0 ? "No import rows are available" : "No lines remain eligible",
+    detail: "This receipt has no rows ready for a merge or resume action. You can still review its line history and verify the current Shopify state.",
+    tone: "neutral" as const,
+  };
 }
 
 export default function ImportBatchDetail() {
@@ -112,13 +230,14 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
   const [lineSearch, setLineSearch] = useState("");
   const [lineStatusFilter, setLineStatusFilter] = useState("ALL");
   const [lineTypeFilter, setLineTypeFilter] = useState("ALL");
+  const [errorGroupFilter, setErrorGroupFilter] = useState<string | null>(null);
   const [linePage, setLinePage] = useState(0);
   const linePageSize = 25;
   const [sortAscending, setSortAscending] = useState(true);
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
   const [revalidationLineId, setRevalidationLineId] = useState<string | null>(null);
   const [inspectorMode, setInspectorMode] = useState<"details" | "edit" | "add" | "delete">("details");
-  const [mergeConfirming, setMergeConfirming] = useState(false);
+  const [mergeConfirmationRevision, setMergeConfirmationRevision] = useState<string | null>(null);
   const [drawerDirty, setDrawerDirty] = useState(false);
   const [discardConfirming, setDiscardConfirming] = useState(false);
   const [discardForDelete, setDiscardForDelete] = useState(false);
@@ -181,55 +300,51 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
       manualIdCopyRef.current?.select();
     }
   }, [idCopyFeedback]);
-  const successful = batch.lines.filter((line) => line.status === "SUCCEEDED").length;
-  const totalLines = batch.lines.length;
-  const completionPercent = totalLines > 0 ? Math.round((successful / totalLines) * 100) : 0;
-  const failed = batch.lines.filter((line) => line.status === "FAILED").length;
-  const blocked = batch.lines.filter((line) => line.status === "BLOCKED" || line.operationType === "BLOCKED").length;
-  const uncertain = batch.lines.filter((line) => line.status === "UNCERTAIN" || line.status === "RUNNING").length;
-  const confirmedProductStages = new Set([
-    "PRODUCT_CREATED", "INVENTORY_ITEM_CONFIGURING", "INVENTORY_ITEM_CONFIGURED",
-    "VARIANT_PRICE_CONFIGURING", "VARIANT_PRICE_CONFIGURED", "INVENTORY_ACTIVATING",
-    "INVENTORY_ACTIVE", "COMPLETED",
-  ]);
-  const confirmedProductsCreated = batch.lines.filter((line) =>
-    line.operationType === "CREATE_DRAFT" && Boolean(line.productId) &&
-    confirmedProductStages.has(line.stage),
-  ).length;
-  const uncertainProductCreations = batch.lines.filter((line) =>
-    line.operationType === "CREATE_DRAFT" &&
-    (line.errorCode === "PRODUCT_CREATE_UNCERTAIN" ||
-      (line.stage === "PRODUCT_CREATING" && ["UNCERTAIN", "RUNNING"].includes(line.status))),
-  ).length;
+  const progressSummary = summarizeReceiptProgress(batch.lines);
+  const lineItems = batch.lines;
+  const { successful, totalLines, completionPercent, failed, blocked, uncertain,
+    confirmedProductsCreated, uncertainProductCreations, confirmedInventoryActivated,
+    confirmedInventoryAdjustments, createdDraftInventoryFailures, eligibleCount } = progressSummary;
+  const hideStaleMergeConfirmationError = eligibleCount === 0 &&
+    actionData?.error === "Confirm the current number of eligible rows and any excluded rows before merging.";
   const verificationAnnouncement = actionData?.verification
     ? "Shopify state verification complete at " + actionData.verification.verifiedAt + ". " +
       actionData.verification.counts.SAFE_CANDIDATE + " safe candidates, " +
       actionData.verification.counts.BLOCKED + " blocked, " +
       actionData.verification.counts.UNCERTAIN + " uncertain."
     : "";
-  const confirmedInventoryActivated = batch.lines.filter((line) =>
-    line.operationType === "CREATE_DRAFT" &&
-    (line.stage === "INVENTORY_ACTIVE" || (line.stage === "COMPLETED" && line.status === "SUCCEEDED")),
-  ).length;
-  const createdDraftInventoryFailures = batch.lines.filter((line) =>
-    line.operationType === "CREATE_DRAFT" && Boolean(line.productId) && line.status === "FAILED" &&
-    (line.stage === "INVENTORY_ACTIVATING" || line.errorCode?.startsWith("INVENTORY_ACTIVATE_")),
-  ).length;
   const visibleVerificationRows = actionData?.verification?.rows.filter((row) =>
     verificationFilter === "ALL" || row.classification === verificationFilter,
   ) ?? [];
+  const validationErrorGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; label: string; hint: string; lines: typeof lineItems }>();
+    for (const line of lineItems) {
+      if (validationGroup(line) !== "ERROR") continue;
+      const key = validationIssueKey(line);
+      const group = groups.get(key);
+      if (group) group.lines.push(line);
+      else groups.set(key, {
+        key,
+        label: validationIssueLabel(line),
+        hint: correctionHint(line.errorCode),
+        lines: [line],
+      });
+    }
+    return [...groups.values()].sort((left, right) => right.lines.length - left.lines.length);
+  }, [lineItems]);
   const filteredLines = useMemo(() => {
     const query = lineSearch.trim().toLowerCase();
-    return batch.lines.filter((line) => {
+    return lineItems.filter((line) => {
       const matchesSearch = !query || [line.sku, line.title, line.matchedProductTitle, line.matchedVariantTitle]
         .some((value) => value?.toLowerCase().includes(query));
       const matchesStatus = ["ALL", "READY", "MISSING", "ERROR"].includes(lineStatusFilter) || line.status === lineStatusFilter;
       const matchesType = lineTypeFilter === "ALL" || line.operationType === lineTypeFilter;
       const matchesValidation = ["READY", "MISSING", "ERROR"].includes(lineStatusFilter)
         ? validationGroup(line) === lineStatusFilter : true;
-      return matchesSearch && matchesStatus && matchesValidation && matchesType;
+      const matchesErrorGroup = errorGroupFilter === null || validationIssueKey(line) === errorGroupFilter;
+      return matchesSearch && matchesStatus && matchesValidation && matchesType && matchesErrorGroup;
     }).sort((left, right) => sortAscending ? left.rowNumber - right.rowNumber : right.rowNumber - left.rowNumber);
-  }, [batch.lines, lineSearch, lineStatusFilter, lineTypeFilter, sortAscending]);
+  }, [lineItems, lineSearch, lineStatusFilter, lineTypeFilter, errorGroupFilter, sortAscending]);
   const linePageCount = Math.max(1, Math.ceil(filteredLines.length / linePageSize));
   const visibleLines = filteredLines.slice(linePage * linePageSize, (linePage + 1) * linePageSize);
   const productWriteRequired = batch.lines.some((line) =>
@@ -245,15 +360,25 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
     ...(productWriteRequired && missingWriteScopes.includes("write_products") ? ["write_products"] : []),
   ];
   const mergeDisabled = !scopesVerified || missingReadScopes.length > 0 || missingWriteScopes.includes("write_inventory") || (productWriteRequired && missingWriteScopes.includes("write_products")) || !hasMergeable;
-  const mergeDisabledReason = !scopesVerified
+  const mergeDisabledReason = !hasMergeable ? null : !scopesVerified
     ? "Shopify permissions could not be verified. Refresh this page and reauthorize StockHub if the issue continues."
     : missingReadScopes.length > 0 || missingRequiredWriteScopes.length > 0
       ? `Missing Shopify permissions: ${[...missingReadScopes, ...missingRequiredWriteScopes].join(", ")}. Reauthorize StockHub before merging or resuming.`
-      : !hasMergeable
-          ? "There are no eligible lines left to merge or resume."
-          : null;
+      : null;
   const executionStarted = batch.status !== "PREVIEWED" || batch.lines.some((line) => line.stage !== "PREPARED" || line.status === "SUCCEEDED");
-  const eligibleCount = batch.lines.filter((line) => !["SUCCEEDED", "BLOCKED"].includes(line.status) && line.operationType !== "BLOCKED").length;
+  const mergeEligibilityRevision = JSON.stringify([
+    batch.updatedAt.toISOString(),
+    batch.lines.map((line) => [line.id, line.status, line.stage, line.operationType]),
+    eligibleCount,
+    blocked,
+  ]);
+  const mergeConfirming = eligibleCount > 0 && mergeConfirmationRevision === mergeEligibilityRevision;
+  useEffect(() => {
+    if (mergeConfirmationRevision && mergeConfirmationRevision !== mergeEligibilityRevision) {
+      setMergeConfirmationRevision(null);
+    }
+  }, [mergeConfirmationRevision, mergeEligibilityRevision]);
+  const noEligibleMessage = noEligibleReceiptMessage(progressSummary, { batchStatus: batch.status, executionStarted });
   const savingDraft = ["draftAddLine", "draftEditLine", "draftDeleteLine"].includes(String(navigation.formData?.get("intent") ?? ""));
   useEffect(() => {
     if (savingDraft) {
@@ -319,52 +444,100 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
       setIdCopyFeedback({ label, status: "failed" });
     }
   };
+  const renderRowActions = (line: (typeof batch.lines)[number]) => (
+    <div className="stockhub-row-actions">
+      <button type="button" className="stockhub-icon-action" title={`Open details for row ${line.rowNumber}`} aria-label={`Open details for row ${line.rowNumber}`} onClick={(event) => openInspector(line.id, "details", event.currentTarget)}>
+        <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>
+      </button>
+      {draftEditable && ["PREVIEWED", "BLOCKED"].includes(line.status) ? <>
+        <button type="button" className="stockhub-icon-action" title={`Edit row ${line.rowNumber}`} aria-label={`Edit row ${line.rowNumber}`} onClick={(event) => openInspector(line.id, "edit", event.currentTarget)}>
+          <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m14 5 5 5M4 20l4.2-.9L19 8.3a2.1 2.1 0 0 0-3-3L5.2 16.1 4 20Z"/></svg>
+        </button>
+        <button type="button" className="stockhub-icon-action" title={`Delete row ${line.rowNumber}`} aria-label={`Delete row ${line.rowNumber}`} onClick={(event) => openInspector(line.id, "delete", event.currentTarget)}>
+          <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 14h10l1-14M9 7V4h6v3"/></svg>
+        </button>
+      </> : null}
+    </div>
+  );
 
   return (
     <div className="stockhub-receipt-card"><s-section>
       <RoutePending />
-      <div className="stockhub-receipt-header">
-      <s-stack direction="block" gap="small">
-        <s-button href={historyHref}>← Back to History</s-button>
-        <s-heading>Receipt {batch.receiptCode}</s-heading>
-        <s-text>{batch.locationName} · {formatStockhubDateTime(batch.createdAt)} · <s-badge tone={statusTone(batch.status)} icon={statusIcon(batch.status)}>{batchStatusLabel(batch.status)}</s-badge></s-text>
-      </s-stack>
-      </div>
-      {batch.status === "PREVIEWED" ? <s-banner tone="info">Draft — not sent to Shopify. Editing validates the row and reads current SKU/location data only; Shopify changes happen only after an explicit merge confirmation.</s-banner> : null}
+      <header className="stockhub-receipt-header">
+        <div className="stockhub-receipt-header__main">
+          <a className="stockhub-receipt-back" href={historyHref}>← Import history</a>
+          <div className="stockhub-receipt-heading-row">
+            <div><span className="stockhub-receipt-eyebrow">Import receipt</span><s-heading>{batch.receiptCode}</s-heading></div>
+            <s-badge tone={statusTone(batch.status)} icon={statusIcon(batch.status)}>{batchStatusLabel(batch.status)}</s-badge>
+          </div>
+          <dl className="stockhub-receipt-metadata">
+            <div><dt>Location</dt><dd>{batch.locationName}</dd></div>
+            <div><dt>Created</dt><dd>{formatStockhubDateTime(batch.createdAt)}</dd></div>
+          </dl>
+        </div>
+        <div className="stockhub-receipt-header__actions" role="group" aria-label="Receipt actions">
+          <Form method="post"><input type="hidden" name="intent" value="verifyShopifyState"/><input type="hidden" name="batchId" value={batch.id}/><s-button type="submit">Verify Shopify State</s-button></Form>
+        </div>
+      </header>
+      {batch.status === "PREVIEWED" ? <p className="stockhub-receipt-draft-note"><strong>Preview only.</strong> No Shopify changes have been made. Editing validates the row and reads current SKU/location data; inventory or product changes require explicit Merge confirmation.</p> : null}
       {draftNotice ? <div className="stockhub-toast" role="status" aria-live="polite">{draftNotice === "updated" ? "Draft row saved and validation refreshed." : `Draft row ${draftNotice}.`} The receipt has been refreshed.</div> : null}
-      <div className="stockhub-draft-status-summary" role="group" aria-label="Draft validation summary">
-        <button type="button" aria-pressed={lineStatusFilter === "READY"} onClick={() => { setLineStatusFilter((value) => value === "READY" ? "ALL" : "READY"); setLinePage(0); }}><strong>{readyCount}</strong><span>Ready to Merge</span></button>
-        <button type="button" aria-pressed={lineStatusFilter === "MISSING"} onClick={() => { setLineStatusFilter((value) => value === "MISSING" ? "ALL" : "MISSING"); setLinePage(0); }}><strong>{missingCount}</strong><span>Missing Information</span></button>
-        <button type="button" aria-pressed={lineStatusFilter === "ERROR"} onClick={() => { setLineStatusFilter((value) => value === "ERROR" ? "ALL" : "ERROR"); setLinePage(0); }}><strong>{errorCount}</strong><span>Error</span></button>
-      </div>
-      <s-grid gridTemplateColumns="repeat(auto-fit, minmax(160px, 1fr))" gap="base">
-        <s-text>Total rows: {totalLines}</s-text>
-      </s-grid>
+      {!executionStarted ? <section className="stockhub-quality-summary" aria-labelledby="stockhub-quality-heading">
+        <div className="stockhub-quality-summary__heading"><div><span className="stockhub-receipt-eyebrow">Validation</span><h2 id="stockhub-quality-heading">Review this preview</h2></div><span>{totalLines} total row{totalLines === 1 ? "" : "s"}</span></div>
+        <p className="stockhub-quality-summary__intro">Filter the rows by validation result. Correct missing or invalid data, then revalidate before merging.</p>
+        <div className="stockhub-draft-status-summary" role="group" aria-label="Draft validation summary">
+          <button type="button" aria-pressed={lineStatusFilter === "READY" && !errorGroupFilter} onClick={() => { setLineStatusFilter((value) => value === "READY" && !errorGroupFilter ? "ALL" : "READY"); setErrorGroupFilter(null); setLinePage(0); }}><strong>{readyCount}</strong><span><b>Ready to Merge</b><small>Passed preview checks</small></span></button>
+          <button type="button" aria-pressed={lineStatusFilter === "MISSING" && !errorGroupFilter} onClick={() => { setLineStatusFilter((value) => value === "MISSING" && !errorGroupFilter ? "ALL" : "MISSING"); setErrorGroupFilter(null); setLinePage(0); }}><strong>{missingCount}</strong><span><b>Missing Information</b><small>Complete required fields</small></span></button>
+          <button type="button" aria-pressed={lineStatusFilter === "ERROR" && !errorGroupFilter} onClick={() => { setLineStatusFilter((value) => value === "ERROR" && !errorGroupFilter ? "ALL" : "ERROR"); setErrorGroupFilter(null); setLinePage(0); }}><strong>{errorCount}</strong><span><b>Error</b><small>Review validation issues</small></span></button>
+        </div>
+      </section> : null}
+      {!executionStarted && validationErrorGroups.length > 0 ? <section className="stockhub-validation-issues" aria-labelledby="stockhub-validation-issues-heading">
+        <div className="stockhub-validation-issues__heading"><div><span className="stockhub-receipt-eyebrow">Action needed</span><h2 id="stockhub-validation-issues-heading">Validation issues</h2></div><span className="stockhub-validation-issues__total">{errorCount} affected row{errorCount === 1 ? "" : "s"}</span></div>
+        <p className="stockhub-validation-issues__intro">Issues are grouped so you can address each cause once. These are preview validation results, not failed Shopify mutations.</p>
+        <ul className="stockhub-validation-issue-list">{validationErrorGroups.map((group) => <li key={group.key}>
+          <div className="stockhub-validation-issue-list__content"><span className="stockhub-validation-issue-list__count">{group.lines.length}</span><div><strong>{group.label}</strong><p>{group.hint}</p><small>Rows {group.lines.slice(0, 5).map((line) => line.rowNumber).join(", ")}{group.lines.length > 5 ? `, and ${group.lines.length - 5} more` : ""}</small></div></div>
+          <button type="button" className="stockhub-text-action" onClick={() => { setLineStatusFilter("ERROR"); setErrorGroupFilter(group.key); setLineSearch(""); setLineTypeFilter("ALL"); setLinePage(0); document.getElementById("stockhub-receipt-lines")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>Show {group.lines.length} affected rows</button>
+        </li>)}</ul>
+      </section> : null}
       {executionStarted ? <><div className="stockhub-receipt-progress" role="group" aria-label="Import line completion">
         <div className="stockhub-receipt-progress-label">
-          <strong>Import progress</strong>
+          <strong>Import line processing</strong>
           <span>{successful} of {totalLines} lines completed · {completionPercent}%</span>
         </div>
         <progress aria-label={`${successful} of ${totalLines} import lines completed`} max={Math.max(totalLines, 1)} value={successful} />
       </div>
-      <div className="stockhub-receipt-summary-wrap" role="region" aria-label="Import progress summary">
-        <table className="stockhub-receipt-summary">
-          <caption>Import progress summary</caption>
-          <thead><tr><th scope="col">Metric</th><th scope="col">Count</th></tr></thead>
-          <tbody>
-            <tr><th scope="row">Draft products created</th><td><span className={`stockhub-receipt-summary-count ${confirmedProductsCreated > 0 ? "stockhub-receipt-summary-count--success" : "stockhub-receipt-summary-count--neutral"}`}>{confirmedProductsCreated} confirmed</span></td></tr>
-            <tr><th scope="row">Unresolved Draft product creation</th><td><span className={`stockhub-receipt-summary-count ${uncertainProductCreations > 0 ? "stockhub-receipt-summary-count--warning" : "stockhub-receipt-summary-count--neutral"}`}>{uncertainProductCreations}</span></td></tr>
-            <tr><th scope="row">Inventory activated</th><td><span className={`stockhub-receipt-summary-count ${confirmedInventoryActivated > 0 ? "stockhub-receipt-summary-count--success" : "stockhub-receipt-summary-count--neutral"}`}>{confirmedInventoryActivated} confirmed</span></td></tr>
-            <tr><th scope="row">Import lines completed</th><td><span className={`stockhub-receipt-summary-count ${successful > 0 ? "stockhub-receipt-summary-count--success" : "stockhub-receipt-summary-count--neutral"}`}>{successful}</span></td></tr>
-            <tr><th scope="row">Failed</th><td><span className={`stockhub-receipt-summary-count ${failed > 0 ? "stockhub-receipt-summary-count--error" : "stockhub-receipt-summary-count--success"}`}>{failed}</span></td></tr>
-            <tr><th scope="row">Blocked</th><td><span className={`stockhub-receipt-summary-count ${blocked > 0 ? "stockhub-receipt-summary-count--warning" : "stockhub-receipt-summary-count--success"}`}>{blocked}</span></td></tr>
-            <tr><th scope="row">Uncertain</th><td><span className={`stockhub-receipt-summary-count ${uncertain > 0 ? "stockhub-receipt-summary-count--warning" : "stockhub-receipt-summary-count--success"}`}>{uncertain}</span></td></tr>
-          </tbody>
-        </table>
-      </div>
-      <s-paragraph>Product creation and inventory activation are separate stages; a created Draft product does not mean its import line or inventory step completed. Counts use persisted confirmed stage data only.</s-paragraph>
+      <section className="stockhub-receipt-progress-summary" aria-label="Confirmed Shopify operations">
+        <div className="stockhub-receipt-summary-cards">
+          <article className="stockhub-receipt-summary-card stockhub-receipt-summary-card--primary">
+            <span>Import lines completed</span><strong>{successful}<small> / {totalLines}</small></strong>
+            <p>Lines whose persisted import status is successful</p>
+          </article>
+          <article className="stockhub-receipt-summary-card">
+            <span>Draft products created</span><strong>{confirmedProductsCreated}</strong>
+            <p>Confirmed Shopify product creations</p>
+          </article>
+          <article className="stockhub-receipt-summary-card">
+            <span>New-product inventory activations</span><strong>{confirmedInventoryActivated}</strong>
+            <p>Inventory activation for products created by this receipt</p>
+          </article>
+          <article className="stockhub-receipt-summary-card">
+            <span>Existing SKU inventory adjustments</span><strong>{confirmedInventoryAdjustments}</strong>
+            <p>Confirmed quantity adjustments for matched variants</p>
+          </article>
+        </div>
+        <div className="stockhub-receipt-operation-details" aria-label="Other operation outcomes">
+          <span className={failed > 0 ? "is-error" : ""}><strong>{failed}</strong> failed</span>
+          <span className={blocked > 0 ? "is-warning" : ""}><strong>{blocked}</strong> blocked</span>
+          <span className={uncertain > 0 ? "is-warning" : ""}><strong>{uncertain}</strong> uncertain or in progress</span>
+          {uncertainProductCreations > 0 ? <span className="is-warning"><strong>{uncertainProductCreations}</strong> unresolved product creations</span> : null}
+          {createdDraftInventoryFailures > 0 ? <span className="is-error"><strong>{createdDraftInventoryFailures}</strong> created products with failed inventory activation</span> : null}
+        </div>
+        <p className="stockhub-receipt-summary-note">Counts come from persisted receipt stages. Completed lines, product creation, new-product inventory activation, and existing-SKU adjustments are separate outcomes.</p>
+      </section>
       {createdDraftInventoryFailures > 0 ? <s-banner tone="warning">Products were created, but inventory activation failed for {createdDraftInventoryFailures} Draft product{createdDraftInventoryFailures === 1 ? "" : "s"}. The saved receipt status has not been changed.</s-banner> : null}</> : null}
-      {actionData?.error ? <div ref={conflictRef} tabIndex={-1} role={draftConflict ? "alert" : undefined}><s-banner tone="critical">{actionData.error}{draftConflict ? <s-button type="button" onClick={() => window.location.reload()}>Refresh draft</s-button> : null}</s-banner></div> : null}
+      {eligibleCount === 0 ? <section className={`stockhub-receipt-terminal stockhub-receipt-terminal--${noEligibleMessage.tone}`} role="status" aria-live="polite">
+        <strong>{noEligibleMessage.title}</strong><p>{noEligibleMessage.detail}</p>
+      </section> : null}
+      {actionData?.error && !hideStaleMergeConfirmationError ? <div ref={conflictRef} tabIndex={-1} role={draftConflict ? "alert" : undefined}><s-banner tone="critical">{actionData.error}{draftConflict ? <s-button type="button" onClick={() => window.location.reload()}>Refresh draft</s-button> : null}</s-banner></div> : null}
       {actionData?.authorizationError ? <s-banner tone="critical">{actionData.authorizationError}</s-banner> : null}
       <div
         role="status"
@@ -406,47 +579,67 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
         <s-table variant="auto"><s-table-header-row><s-table-header listSlot="primary" format="numeric">Row</s-table-header><s-table-header listSlot="labeled" format="base">SKU</s-table-header><s-table-header listSlot="labeled" format="base">Classification</s-table-header><s-table-header listSlot="labeled" format="base">Reason</s-table-header></s-table-header-row><s-table-body>{visibleVerificationRows.map((row) => <s-table-row key={`${row.rowNumber}-${row.sku}`}><s-table-cell>{row.rowNumber}</s-table-cell><s-table-cell>{row.sku}</s-table-cell><s-table-cell>{verificationClassificationLabel(row.classification)}</s-table-cell><s-table-cell>{row.reasons.join("; ")}</s-table-cell></s-table-row>)}</s-table-body></s-table>
         {visibleVerificationRows.length === 0 ? <s-paragraph>No SKU rows match this classification.</s-paragraph> : null}
       </div> : null}
-      <div className="stockhub-receipt-actions" role="group" aria-label="Receipt actions">
-        <Form method="post"><input type="hidden" name="intent" value="verifyShopifyState"/><input type="hidden" name="batchId" value={batch.id}/><s-button type="submit">Verify Shopify State</s-button></Form>
-      </div>
-      {mergeDisabledReason ? <s-banner tone="warning">{mergeDisabledReason}</s-banner> : null}
-      <s-heading>Line items</s-heading>
-      {batch.lines.length || draftEditable ? <>
-        <div className="stockhub-line-toolbar">
-          <div className="stockhub-line-toolbar__count"><strong>{totalLines}</strong> imported item{totalLines === 1 ? "" : "s"}</div>
-          <div className="stockhub-line-toolbar__filters" role="search" aria-label="Search and filter imported items">
-            <s-text-field label="Search line items" value={lineSearch} placeholder="Search SKU or product" onChange={(event) => { setLineSearch(event.currentTarget.value); setLinePage(0); }} />
-            <s-select label="Quality status" value={lineStatusFilter} onChange={(event) => { setLineStatusFilter(event.currentTarget.value); setLinePage(0); }}>
-              <s-option value="ALL">All statuses</s-option>
-              <s-option value="READY">Ready to Merge</s-option><s-option value="MISSING">Missing Information</s-option><s-option value="ERROR">Error</s-option>
-              {(["PREVIEWED", "RUNNING", "SUCCEEDED", "FAILED", "BLOCKED", "UNCERTAIN"] as const).map((status) => <s-option key={status} value={status}>{statusLabel(status)}</s-option>)}
-            </s-select>
-            <s-select label="Operation type" value={lineTypeFilter} onChange={(event) => { setLineTypeFilter(event.currentTarget.value); setLinePage(0); }}>
-              <s-option value="ALL">All operations</s-option><s-option value="ADJUST">Inventory adjustment</s-option><s-option value="CREATE_DRAFT">Create Draft product</s-option><s-option value="BLOCKED">Blocked row</s-option>
-            </s-select>
-            <s-button type="button" onClick={() => setSortAscending((ascending) => !ascending)}>Sort {sortAscending ? "↑" : "↓"}</s-button>
+      {mergeDisabledReason && eligibleCount > 0 ? <div className="stockhub-merge-disabled-note" role="status">{mergeDisabledReason}</div> : null}
+      <section className="stockhub-receipt-lines" id="stockhub-receipt-lines" aria-labelledby="stockhub-receipt-lines-heading">
+        <div className="stockhub-receipt-lines__heading"><div><span className="stockhub-receipt-eyebrow">Receipt rows</span><h2 id="stockhub-receipt-lines-heading">Line items</h2></div><p>Open a row to review its details or edit a preview draft.</p></div>
+        {batch.lines.length || draftEditable ? <>
+          <div className="stockhub-line-toolbar" aria-label="Line item tools">
+            <div className="stockhub-line-toolbar__summary"><strong>{filteredLines.length}</strong><span>shown of {batch.lines.length}</span></div>
+            <div className="stockhub-line-toolbar__filters" role="search" aria-label="Search and filter imported items">
+              <s-text-field label="Search line items" value={lineSearch} placeholder="Search SKU or product" onChange={(event) => { setLineSearch(event.currentTarget.value); setLinePage(0); }} />
+              <s-select label="Quality status" value={lineStatusFilter} onChange={(event) => { setLineStatusFilter(event.currentTarget.value); setErrorGroupFilter(null); setLinePage(0); }}>
+                <s-option value="ALL">All statuses</s-option>
+                <s-option value="READY">Ready to Merge</s-option><s-option value="MISSING">Missing Information</s-option><s-option value="ERROR">Error</s-option>
+                {(["PREVIEWED", "RUNNING", "SUCCEEDED", "FAILED", "BLOCKED", "UNCERTAIN"] as const).map((status) => <s-option key={status} value={status}>{statusLabel(status)}</s-option>)}
+              </s-select>
+              <s-select label="Operation type" value={lineTypeFilter} onChange={(event) => { setLineTypeFilter(event.currentTarget.value); setLinePage(0); }}>
+                <s-option value="ALL">All operations</s-option><s-option value="ADJUST">Inventory adjustment</s-option><s-option value="CREATE_DRAFT">Create Draft product</s-option><s-option value="BLOCKED">Blocked row</s-option>
+              </s-select>
+              <s-button type="button" onClick={() => setSortAscending((ascending) => !ascending)}>Sort by row {sortAscending ? "↑" : "↓"}</s-button>
+            </div>
+            <div className="stockhub-line-toolbar__actions">
+              {draftEditable ? <s-button type="button" variant="primary" onClick={(event) => { inspectorTriggerRef.current = event.currentTarget as HTMLElement; setSelectedLineId(null); setInspectorMode("add"); }}>＋ Add draft row</s-button> : null}
+              {draftEditable ? <Form method="post" onSubmit={() => setMergeConfirmationRevision(null)}><input type="hidden" name="intent" value="draftEditLine"/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="lineId" value={revalidationLine?.id ?? ""}/><input type="hidden" name="expectedUpdatedAt" value={batch.updatedAt.toISOString()}/><input type="hidden" name="sku" value={revalidationLine?.sku ?? ""}/><input type="hidden" name="quantity" value={revalidationLine?.quantity ?? ""}/><input type="hidden" name="title" value={revalidationLine?.title ?? ""}/><input type="hidden" name="price" value={revalidationLine?.price ?? ""}/><input type="hidden" name="description" value={revalidationLine?.description ?? ""}/><input type="hidden" name="image_url" value={revalidationLine?.imageUrl ?? ""}/><s-button type="submit" disabled={!revalidationLine || savingDraft}>Revalidate selected row</s-button></Form> : null}
+            </div>
+            {errorGroupFilter ? <div className="stockhub-line-toolbar__active-filter" role="status"><span>Showing one validation issue group</span><button type="button" className="stockhub-text-action" onClick={() => { setErrorGroupFilter(null); setLineStatusFilter("ALL"); setLinePage(0); }}>Clear filter</button></div> : null}
           </div>
-          {draftEditable ? <s-button type="button" variant="primary" onClick={(event) => { inspectorTriggerRef.current = event.currentTarget as HTMLElement; setSelectedLineId(null); setInspectorMode("add"); }}>＋ Add draft row</s-button> : null}
-        </div>
-        <div className="stockhub-merge-action stockhub-merge-bar">
-          <div><strong>Eligible: {eligibleCount} rows</strong>{blocked > 0 ? <span> · Excluded: {blocked} blocked rows</span> : null}</div>
-          {draftEditable ? <><Form method="post" onSubmit={() => setMergeConfirming(false)}><input type="hidden" name="intent" value="draftEditLine"/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="lineId" value={revalidationLine?.id ?? ""}/><input type="hidden" name="expectedUpdatedAt" value={batch.updatedAt.toISOString()}/><input type="hidden" name="sku" value={revalidationLine?.sku ?? ""}/><input type="hidden" name="quantity" value={revalidationLine?.quantity ?? ""}/><input type="hidden" name="title" value={revalidationLine?.title ?? ""}/><input type="hidden" name="price" value={revalidationLine?.price ?? ""}/><input type="hidden" name="description" value={revalidationLine?.description ?? ""}/><input type="hidden" name="image_url" value={revalidationLine?.imageUrl ?? ""}/><s-button type="submit" disabled={!revalidationLine || savingDraft}>Revalidate selected row</s-button></Form>{!revalidationLine ? <span className="stockhub-merge-bar__hint">Select a draft row to revalidate it.</span> : null}</> : null}
-          {!mergeConfirming ? <s-button type="button" variant="primary" disabled={mergeDisabled} onClick={() => setMergeConfirming(true)}>{batch.status === "PREVIEWED" ? "Merge" : "Resume"} eligible lines</s-button> : <div className="stockhub-merge-confirmation" role="dialog" aria-label="Confirm inventory merge"><s-paragraph>Confirm {batch.status === "PREVIEWED" ? "merge" : "resume"} of {eligibleCount} eligible row(s) for receipt {batch.receiptCode}. Shopify writes start only after this confirmation.{blocked > 0 ? ` ${blocked} blocked row(s) will remain attached to this receipt.` : ""}</s-paragraph><Form method="post"><input type="hidden" name="intent" value={batch.status === "PREVIEWED" ? "merge" : "resume"}/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="confirmed" value="yes"/><input type="hidden" name="confirmedCount" value={eligibleCount}/>{blocked > 0 ? <input type="hidden" name="partialConfirmed" value="yes"/> : null}<s-button type="submit" variant="primary">Confirm merge of {eligibleCount} rows</s-button><s-button type="button" onClick={() => setMergeConfirming(false)}>Cancel</s-button></Form></div>}
-        </div>
-        <s-text>{filteredLines.length} of {batch.lines.length} line items · Page {Math.min(linePage + 1, linePageCount)} of {linePageCount}</s-text>
-        <s-table variant="auto">
-        <s-table-header-row><s-table-header listSlot="primary" format="base">Product / Variant</s-table-header><s-table-header listSlot="labeled" format="base">SKU</s-table-header><s-table-header listSlot="labeled" format="numeric">Quantity</s-table-header><s-table-header listSlot="labeled" format="base">Quality Status</s-table-header><s-table-header listSlot="labeled" format="base">Merge Progress</s-table-header><s-table-header listSlot="labeled" format="base">Actions</s-table-header></s-table-header-row>
-        <s-table-body>{visibleLines.map((line) => <s-table-row key={line.id}>
-          <s-table-cell><button type="button" className="stockhub-row-open" onClick={(event) => openInspector(line.id, "details", event.currentTarget)}>{line.matchedProductTitle ?? line.title ?? "Untitled product"}{line.matchedVariantTitle ? <small>{line.matchedVariantTitle}</small> : null}</button></s-table-cell><s-table-cell>{line.sku}</s-table-cell><s-table-cell>{line.quantity ?? "—"}</s-table-cell><s-table-cell><s-stack direction="block" gap="small"><s-badge tone={validationGroup(line) === "COMPLETED" || validationGroup(line) === "READY" ? "success" : validationGroup(line) === "MISSING" ? "warning" : "critical"} icon={validationGroup(line) === "COMPLETED" || validationGroup(line) === "READY" ? "check-circle" : "alert-circle"}>{validationGroup(line) === "COMPLETED" ? "Completed" : validationGroup(line) === "READY" ? "Ready" : validationGroup(line) === "MISSING" ? "Missing info" : "Error"}</s-badge>{validationGroup(line) !== "COMPLETED" ? <s-text>{line.errorDetail ?? correctionHint(line.errorCode)}</s-text> : null}</s-stack></s-table-cell><s-table-cell><s-stack direction="block" gap="small"><s-badge tone={statusTone(line.status)} icon={statusIcon(line.status)}>{statusLabel(line.status)}</s-badge><s-text>{stageLabel(line.stage, line.status, line.errorCode)}</s-text></s-stack></s-table-cell>
-          <s-table-cell><div className="stockhub-row-actions"><button type="button" className="stockhub-icon-action" title={`Open details for row ${line.rowNumber}`} aria-label={`Open details for row ${line.rowNumber}`} onClick={(event) => openInspector(line.id, "details", event.currentTarget)}>⌕</button>{draftEditable && ["PREVIEWED", "BLOCKED"].includes(line.status) ? <><button type="button" className="stockhub-icon-action" title={`Edit row ${line.rowNumber}`} aria-label={`Edit row ${line.rowNumber}`} onClick={(event) => openInspector(line.id, "edit", event.currentTarget)}>✎</button><button type="button" className="stockhub-icon-action" title={`Delete row ${line.rowNumber}`} aria-label={`Delete row ${line.rowNumber}`} onClick={(event) => openInspector(line.id, "delete", event.currentTarget)}>⌫</button></> : null}</div></s-table-cell>
-        </s-table-row>)}</s-table-body>
-        </s-table>
-        {visibleLines.length === 0 ? <s-paragraph>No line items match these filters.</s-paragraph> : null}
-        {linePageCount > 1 ? <s-button-group gap="base" accessibilityLabel="Receipt line pagination">
-          <s-button disabled={linePage === 0} onClick={() => setLinePage((page) => Math.max(0, page - 1))}>Previous</s-button>
-          <s-button disabled={linePage + 1 >= linePageCount} onClick={() => setLinePage((page) => Math.min(linePageCount - 1, page + 1))}>Next</s-button>
-        </s-button-group> : null}
-      </> : <s-paragraph>No import lines are recorded for this receipt.</s-paragraph>}
+          {eligibleCount > 0 || draftEditable ? <div className="stockhub-merge-action stockhub-merge-bar">
+            <div className="stockhub-merge-bar__summary"><strong>{eligibleCount} eligible row{eligibleCount === 1 ? "" : "s"}</strong>{blocked > 0 ? <span>{blocked} excluded as blocked</span> : null}<small>Only eligible rows are included after explicit confirmation.</small></div>
+            {draftEditable && !revalidationLine ? <span className="stockhub-merge-bar__hint">Select a draft row above to revalidate it.</span> : null}
+            {eligibleCount > 0 && !mergeConfirming ? <s-button type="button" variant="primary" disabled={mergeDisabled} onClick={() => setMergeConfirmationRevision(mergeEligibilityRevision)}>{batch.status === "PREVIEWED" ? "Merge" : "Resume"} eligible lines</s-button> : null}
+            {mergeConfirming ? <div className="stockhub-merge-confirmation" role="dialog" aria-label={`Confirm ${batch.status === "PREVIEWED" ? "merge" : "resume"}`}><s-paragraph>Confirm {batch.status === "PREVIEWED" ? "merge" : "resume"} of {eligibleCount} eligible row(s) for receipt {batch.receiptCode}. Shopify writes start only after this confirmation.{blocked > 0 ? ` ${blocked} blocked row(s) will remain attached to this receipt.` : ""}</s-paragraph><Form method="post"><input type="hidden" name="intent" value={batch.status === "PREVIEWED" ? "merge" : "resume"}/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="confirmed" value="yes"/><input type="hidden" name="confirmedCount" value={eligibleCount}/>{blocked > 0 ? <input type="hidden" name="partialConfirmed" value="yes"/> : null}<s-button type="submit" variant="primary">Confirm {batch.status === "PREVIEWED" ? "merge" : "resume"} of {eligibleCount} rows</s-button><s-button type="button" onClick={() => setMergeConfirmationRevision(null)}>Cancel</s-button></Form></div> : null}
+          </div> : null}
+          <p className="stockhub-line-results" aria-live="polite">{filteredLines.length} row{filteredLines.length === 1 ? "" : "s"} · Page {Math.min(linePage + 1, linePageCount)} of {linePageCount}</p>
+          <div className="stockhub-lines-table-wrap">
+            <table className="stockhub-lines-table" aria-label="Receipt line items">
+              <colgroup><col className="stockhub-lines-table__product"/><col className="stockhub-lines-table__sku"/><col className="stockhub-lines-table__quantity"/><col className="stockhub-lines-table__quality"/><col className="stockhub-lines-table__execution"/><col className="stockhub-lines-table__actions"/></colgroup>
+              <thead><tr><th scope="col">Product / Variant</th><th scope="col">SKU</th><th scope="col">Quantity</th><th scope="col">{executionStarted ? "Preview check" : "Validation"}</th><th scope="col">Execution status</th><th scope="col"><span className="stockhub-visually-hidden">Row actions</span></th></tr></thead>
+              <tbody>{visibleLines.map((line) => <tr key={line.id}>
+                <td data-label="Product / Variant"><button type="button" className="stockhub-row-open" onClick={(event) => openInspector(line.id, "details", event.currentTarget)}><span>{line.matchedProductTitle ?? line.title ?? "Untitled product"}</span>{line.matchedVariantTitle ? <small>{line.matchedVariantTitle}</small> : null}</button></td>
+                <td data-label="SKU"><code className="stockhub-line-sku">{line.sku || "—"}</code></td>
+                <td data-label="Quantity" className="stockhub-lines-table__quantity-cell">{line.quantity ?? "—"}</td>
+                <td data-label="Validation"><s-badge tone={validationPresentation(line, executionStarted).tone}>{validationPresentation(line, executionStarted).label}</s-badge></td>
+                <td data-label="Execution status"><div className="stockhub-line-execution"><s-badge tone={statusTone(line.status)} icon={statusIcon(line.status)}>{statusLabel(line.status)}</s-badge><small>{stageLabel(line.stage, line.status, line.errorCode)}</small></div></td>
+                <td data-label="Actions" className="stockhub-lines-table__actions-cell">{renderRowActions(line)}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+          <ul className="stockhub-mobile-lines" aria-label="Receipt line items">{visibleLines.map((line) => <li key={`mobile-${line.id}`}>
+            <article className="stockhub-mobile-line-card">
+              <div className="stockhub-mobile-line-card__identity"><button type="button" className="stockhub-row-open" onClick={(event) => openInspector(line.id, "details", event.currentTarget)}>{line.matchedProductTitle ?? line.title ?? "Untitled product"}{line.matchedVariantTitle ? <small>{line.matchedVariantTitle}</small> : null}</button><code>{line.sku || "No SKU"}</code></div>
+              <div className="stockhub-mobile-line-card__badges"><span><small>{executionStarted ? "Preview check" : "Validation"}</small><s-badge tone={validationPresentation(line, executionStarted).tone}>{validationPresentation(line, executionStarted).label}</s-badge></span><span><small>Execution</small><s-badge tone={statusTone(line.status)}>{statusLabel(line.status)}</s-badge></span></div>
+              <div className="stockhub-mobile-line-card__meta"><span><small>Quantity</small><strong>{line.quantity ?? "—"}</strong></span><span><small>Stage</small><strong>{stageLabel(line.stage, line.status, line.errorCode)}</strong></span></div>
+              {line.errorDetail && validationGroup(line) !== "COMPLETED" ? <p className="stockhub-mobile-line-card__issue">{line.errorDetail}</p> : null}
+              <div className="stockhub-mobile-line-card__actions">{renderRowActions(line)}</div>
+            </article>
+          </li>)}</ul>
+          {visibleLines.length === 0 ? <p className="stockhub-lines-empty">No line items match these filters.</p> : null}
+          {linePageCount > 1 ? <s-button-group gap="base" accessibilityLabel="Receipt line pagination">
+            <s-button disabled={linePage === 0} onClick={() => setLinePage((page) => Math.max(0, page - 1))}>Previous</s-button>
+            <s-button disabled={linePage + 1 >= linePageCount} onClick={() => setLinePage((page) => Math.min(linePageCount - 1, page + 1))}>Next</s-button>
+          </s-button-group> : null}
+        </> : <s-paragraph>No import lines are recorded for this receipt.</s-paragraph>}
+      </section>
       {(selectedLine || inspectorMode === "add") ? <>
         <button className="stockhub-drawer-scrim" type="button" aria-label="Close product details" onClick={requestCloseInspector} />
         <aside ref={inspectorRef} className="stockhub-row-inspector" role="dialog" aria-modal="true" aria-labelledby="stockhub-row-inspector-heading">
@@ -460,22 +653,22 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
             <s-paragraph>SKU: {selectedLine.sku} · Quantity: {selectedLine.expectedQuantity === null ? "—" : `${selectedLine.expectedQuantity} → `}{selectedLine.quantity ?? "—"}</s-paragraph>
             {selectedLine.errorDetail || selectedLine.errorCode ? <details><summary>Error details</summary><s-banner tone={selectedLine.status === "BLOCKED" ? "warning" : "critical"}>{selectedLine.errorDetail ?? selectedLine.errorCode}<s-paragraph>{correctionHint(selectedLine.errorCode)}</s-paragraph></s-banner></details> : null}
             {selectedLine.operationType === "CREATE_DRAFT" ? <s-banner tone="info">No matching Shopify SKU was found. <Form method="post" action="/app/imports/catalog"><input type="hidden" name="intent" value="prepare-import-draft"/><input type="hidden" name="productName" value={selectedLine.title ?? ""}/><input type="hidden" name="sku" value={selectedLine.sku}/><input type="hidden" name="price" value={selectedLine.price ?? ""}/><input type="hidden" name="description" value={selectedLine.description ?? ""}/><input type="hidden" name="imageUrl" value={selectedLine.imageUrl ?? ""}/><input type="hidden" name="sourceReceiptCode" value={batch.receiptCode}/><input type="hidden" name="sourceRowNumber" value={selectedLine.rowNumber}/><s-button type="submit">Prepare product draft in Product Catalog</s-button></Form> The existing draft-only workflow receives these CSV values and does not create a Shopify product.</s-banner> : null}
-            {selectedLine.errorCode === "INVENTORY_NOT_TRACKED" ? <s-banner tone="warning">This SKU already matches a Shopify variant, but inventory tracking is disabled. Do not create another product. Review inventory tracking in <a href={`https://${shop}/admin/products${selectedLine.productId ? `/${selectedLine.productId}` : ""}`} target="_blank" rel="noreferrer">Shopify Admin</a>.</s-banner> : null}
+            {selectedLine.errorCode === "INVENTORY_NOT_TRACKED" ? <s-banner tone="warning">This SKU already matches a Shopify variant; do not create another product. If this variant should be stocked, open <a href={`https://${shop}/admin/products${selectedLine.productId ? `/${selectedLine.productId}` : ""}`} target="_blank" rel="noreferrer">Shopify Admin</a>, enable <strong>Track quantity</strong>, save, then revalidate this row. Stocked products need tracking for quantity adjustments; leave it disabled for items that are not stocked.</s-banner> : null}
             <details><summary>Technical details</summary><s-stack direction="block" gap="small">
               {([["Product ID", selectedLine.productId], ["Variant ID", selectedLine.variantId], ["Inventory Item ID", selectedLine.inventoryItemId]] as const).map(([label, value]) => <div key={label}><code>{label}: {value ?? "—"}</code><s-button type="button" disabled={!value} accessibilityLabel={"Copy " + label} onClick={() => copyIdentifier(label, value)}>Copy {label}</s-button>{idCopyFeedback?.label === label && idCopyFeedback.status === "failed" ? <div role="alert">Could not access the clipboard. Select and copy the ID manually.<textarea ref={manualIdCopyRef} aria-label={label + " for manual copy"} readOnly value={value ?? ""} rows={2} onFocus={(event) => event.currentTarget.select()} /></div> : null}</div>)}
               {idCopyFeedback?.status === "copied" ? <div role="status">Copied {idCopyFeedback.label}.</div> : null}<s-paragraph>Stage: {selectedLine.stage} · Error code: {selectedLine.errorCode ?? "—"}</s-paragraph>
             </s-stack></details>
             {draftEditable && ["PREVIEWED", "BLOCKED"].includes(selectedLine.status) ? <s-button type="button" variant="primary" onClick={() => setInspectorMode("edit")}>Edit draft row</s-button> : null}
           </s-stack> : null}
-          {(inspectorMode === "add" || (inspectorMode === "edit" && selectedLine)) ? <Form method="post" className="stockhub-draft-form" onChange={() => setDrawerDirty(true)} onSubmit={() => setMergeConfirming(false)}>
+          {(inspectorMode === "add" || (inspectorMode === "edit" && selectedLine)) ? <Form method="post" className="stockhub-draft-form" onChange={() => setDrawerDirty(true)} onSubmit={() => setMergeConfirmationRevision(null)}>
             <input type="hidden" name="intent" value={inspectorMode === "add" ? "draftAddLine" : "draftEditLine"}/><input type="hidden" name="batchId" value={batch.id}/>{selectedLine ? <input type="hidden" name="lineId" value={selectedLine.id}/> : null}<input type="hidden" name="expectedUpdatedAt" value={batch.updatedAt.toISOString()}/>
-            {actionData?.error ? <s-banner tone="critical">{actionData.error}</s-banner> : null}
+            {actionData?.error && !hideStaleMergeConfirmationError ? <s-banner tone="critical">{actionData.error}</s-banner> : null}
             {actionData?.authorizationError ? <s-banner tone="critical">{actionData.authorizationError}</s-banner> : null}
             <s-grid gridTemplateColumns="repeat(auto-fit, minmax(180px, 1fr))" gap="base"><s-text-field label="SKU" name="sku" value={draftValues.sku} onChange={(event) => setDraftValues((values) => ({ ...values, sku: event.currentTarget.value }))} required/><label>Quantity<input name="quantity" type="number" min="1" value={draftValues.quantity} onChange={(event) => setDraftValues((values) => ({ ...values, quantity: event.currentTarget.value }))} required/></label><s-text-field label="Product title" name="title" value={draftValues.title} onChange={(event) => setDraftValues((values) => ({ ...values, title: event.currentTarget.value }))}/><label>Price<input name="price" type="number" min="0" step="0.01" value={draftValues.price} onChange={(event) => setDraftValues((values) => ({ ...values, price: event.currentTarget.value }))}/></label><s-text-field label="Description" name="description" value={draftValues.description} onChange={(event) => setDraftValues((values) => ({ ...values, description: event.currentTarget.value }))}/><label>Image URL<input name="image_url" type="url" value={draftValues.image_url} onChange={(event) => setDraftValues((values) => ({ ...values, image_url: event.currentTarget.value }))}/></label></s-grid>
             <div className="stockhub-drawer-actions"><s-button type="submit" variant="primary" disabled={savingDraft}>{savingDraft ? "Saving…" : inspectorMode === "add" ? "Add and validate row" : "Save and revalidate"}</s-button><s-button type="button" disabled={savingDraft} onClick={requestCloseInspector}>Cancel</s-button></div>
           </Form> : null}
           {selectedLine && inspectorMode === "edit" && draftEditable ? <button type="button" className="stockhub-delete-action" onClick={() => { if (drawerDirty) { setDiscardForDelete(true); setDiscardConfirming(true); return; } setInspectorMode("delete"); }}>Delete draft row</button> : null}
-          {selectedLine && inspectorMode === "delete" ? <div className="stockhub-delete-confirm" role="alert"><s-paragraph>Remove draft row {selectedLine.rowNumber} ({selectedLine.sku})? Duplicate-SKU sibling rows may be revalidated. This does not change Shopify.</s-paragraph><Form method="post" onSubmit={() => setMergeConfirming(false)}><input type="hidden" name="intent" value="draftDeleteLine"/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="lineId" value={selectedLine.id}/><input type="hidden" name="expectedUpdatedAt" value={batch.updatedAt.toISOString()}/><s-button type="submit" disabled={savingDraft}>{savingDraft ? "Deleting…" : "Confirm delete"}</s-button><s-button type="button" disabled={savingDraft} onClick={() => setInspectorMode("edit")}>Cancel</s-button></Form></div> : null}
+          {selectedLine && inspectorMode === "delete" ? <div className="stockhub-delete-confirm" role="alert"><s-paragraph>Remove draft row {selectedLine.rowNumber} ({selectedLine.sku})? Duplicate-SKU sibling rows may be revalidated. This does not change Shopify.</s-paragraph><Form method="post" onSubmit={() => setMergeConfirmationRevision(null)}><input type="hidden" name="intent" value="draftDeleteLine"/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="lineId" value={selectedLine.id}/><input type="hidden" name="expectedUpdatedAt" value={batch.updatedAt.toISOString()}/><s-button type="submit" disabled={savingDraft}>{savingDraft ? "Deleting…" : "Confirm delete"}</s-button><s-button type="button" disabled={savingDraft} onClick={() => setInspectorMode("edit")}>Cancel</s-button></Form></div> : null}
           {discardConfirming ? <div className="stockhub-delete-confirm" role="alertdialog" aria-label="Discard unsaved row changes"><s-paragraph>Discard unsaved changes?</s-paragraph><s-button type="button" variant="primary" onClick={() => { if (discardForDelete) { setInspectorMode("delete"); setDrawerDirty(false); setDiscardConfirming(false); setDiscardForDelete(false); } else finishCloseInspector(); }}>Discard changes</s-button><s-button type="button" onClick={() => { setDiscardConfirming(false); setDiscardForDelete(false); }}>Keep editing</s-button></div> : null}
           {!draftEditable && selectedLine ? <s-banner tone="info">Locked — Shopify processing has started or this receipt is no longer a preview.</s-banner> : null}
         </aside>

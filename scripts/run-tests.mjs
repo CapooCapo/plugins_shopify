@@ -45,8 +45,11 @@ let testSchema = sourceSchema
 testSchema = rewriteModelNativeTypes(testSchema, "CatalogImportBatch", [["@db.Text", "", 1]]);
 testSchema = rewriteModelNativeTypes(testSchema, "CatalogImportLine", [["@db.Decimal(20, 6)", "", 1], ["@db.Text", "", 1]]);
 testSchema = rewriteModelNativeTypes(testSchema, "CatalogImportGroup", [["@db.Text", "", 1]]);
+testSchema = rewriteModelNativeTypes(testSchema, "CatalogExecutionOperation", [["@db.Text", "", 1]]);
+testSchema = rewriteModelNativeTypes(testSchema, "CatalogExecutionItem", [["@db.Text", "", 1]]);
+testSchema = rewriteModelNativeTypes(testSchema, "CatalogExecutionAttempt", [["@db.Text", "", 1]]);
 
-for (const modelName of ["CatalogImportBatch", "CatalogImportLine", "CatalogImportGroup"]) {
+for (const modelName of ["CatalogImportBatch", "CatalogImportLine", "CatalogImportGroup", "CatalogImportReview", "CatalogExecutionOperation", "CatalogExecutionItem", "CatalogExecutionAttempt"]) {
   const modelPattern = new RegExp(`(model ${modelName} \\{[\\s\\S]*?\\n\\})`);
   const model = testSchema.match(modelPattern)?.[1];
   if (!model) throw new Error(`Could not find ${modelName} in the derived SQLite test schema`);

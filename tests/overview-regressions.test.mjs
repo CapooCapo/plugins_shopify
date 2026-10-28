@@ -22,18 +22,28 @@ test("Overview import KPIs and recent activity are bounded and scoped to the aut
     "recent activity must be shop-scoped, limited to five, and select only displayed fields");
   assert.match(source, /<OverviewDashboard data=\{data\} error=\{error\} imports=\{imports\}/,
     "the route must render the production dashboard component with live loader data");
-  assert.match(view, />Import batches</);
-  assert.match(view, />Needs attention</);
-  assert.match(view, /failed, uncertain or partial imports/);
+  assert.match(view, />Import receipts</);
+  assert.match(view, />Execution attention</);
+  assert.match(view, /Failed, uncertain, or partially completed Shopify import executions/);
+  assert.match(view, /Previewed draft validation issues stay on their receipts and are not failed Shopify mutations/,
+    "preview validation issues must remain distinct from failed Shopify executions");
   assert.match(view, /stockhub-overview-attention/);
   assert.match(view, />Recent imports</);
-  assert.match(view, />At a glance</);
+  assert.match(view, />Store snapshot</);
+  assert.match(view, /<span className="stockhub-metric-note">Active in Shopify<\/span>/,
+    "the Active total must not imply a publication state the loader does not query");
   assert.match(view, /data\.shop\.name[\s\S]*?data\.shop\.myshopifyDomain/,
     "the dashboard identifies the currently authenticated shop");
   assert.doesNotMatch(view, /Total SKUs|store-wide SKU total/i,
     "the dashboard must not imply that it computed a store-wide SKU count");
   assert.match(view, /className="stockhub-overview-metrics"/,
-    "metrics use the app-owned responsive grid");
+    "product and receipt KPIs use the app-owned responsive grid");
+  assert.match(view, /stockhub-overview-workspace/,
+    "attention and recent receipt panels share the available desktop width");
+  assert.match(view, /stockhub-overview-import-list/,
+    "receipt activity uses compact semantic list rows rather than narrow multi-column tables");
+  assert.match(view, /stockhub-overview-other-products/,
+    "the exact count of products in other statuses remains visible when available");
   assert.match(view, /aria-label="Overview quick actions"/);
   for (const [label, path] of [
     ["New import", "/app/imports"],
@@ -52,6 +62,19 @@ test("Overview import KPIs and recent activity are bounded and scoped to the aut
     "the existing live Shopify product-count presentation must remain");
   assert.match(view, /data\.all\.count - data\.active\.count - data\.draft\.count/,
     "a status breakdown should account for products beyond active and draft");
+});
+
+test("Overview does not expose the local Shopify CLI development banner", async () => {
+  const route = await readFile(overviewRoute, "utf8");
+  const view = await readFile(overviewComponent, "utf8");
+  const styles = await readFile(new URL("../app/styles/stockhub.css", import.meta.url), "utf8");
+
+  assert.doesNotMatch(route, /isLocalDevBuild/,
+    "the Overview route should not carry environment-only banner plumbing");
+  assert.doesNotMatch(view, /stockhub-local-dev-banner|isLocalDevBuild|Shopify CLI · Local development|Changes here are not deployed to Render/,
+    "the Overview should not render the local-development banner");
+  assert.doesNotMatch(styles, /stockhub-local-dev-banner/,
+    "the removed banner should not leave unused styles behind");
 });
 
 test("Overview status aggregation handles empty, failed, mixed, and unknown statuses", async () => {

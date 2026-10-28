@@ -17,26 +17,8 @@ function refuse(message) {
   throw new GuardError(message);
 }
 
-function stripValidatedPrefix(address) {
-  if (typeof address !== "string") return null;
-  const parts = address.split("/");
-  if (parts.length === 1) return parts[0];
-  if (parts.length !== 2 || !/^\d+$/.test(parts[1])) return null;
-  const prefix = Number(parts[1]);
-  const maxPrefix = parts[0].includes(":") ? 128 : 32;
-  if (prefix < 0 || prefix > maxPrefix) return null;
-  return parts[0];
-}
-
-function isLoopbackOrPrivateIpv4(address) {
-  const hostAddress = stripValidatedPrefix(address);
-  if (!hostAddress) return false;
-  if (hostAddress === "127.0.0.1" || hostAddress === "::1") return true;
-  const octets = hostAddress.split(".").map(Number);
-  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
-  return octets[0] === 10
-    || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
-    || (octets[0] === 192 && octets[1] === 168);
+function isExactLoopbackAddress(address) {
+  return ["127.0.0.1", "127.0.0.1/32", "::1", "::1/128"].includes(address);
 }
 
 export function validateTestDatabaseUrls(env) {
@@ -76,8 +58,8 @@ export function validateTestDatabaseUrls(env) {
 export function validateDatabaseIdentity(identity, parsedUrl) {
   if (identity.database !== EXPECTED_TEST_DATABASE) refuse("Connected PostgreSQL database does not match the isolated test database.");
   if (!identity.user || identity.user !== decodeURIComponent(parsedUrl.username)) refuse("Connected PostgreSQL user does not match the explicitly configured test URL.");
-  if (!isLoopbackOrPrivateIpv4(identity.address)) refuse("PostgreSQL server address is not loopback or RFC1918 private; refusing test operation.");
-  if (!isLoopbackOrPrivateIpv4(identity.clientAddress)) refuse("PostgreSQL client address is not loopback or RFC1918 private; refusing test operation.");
+  if (!isExactLoopbackAddress(identity.address)) refuse("PostgreSQL server address is not an exact loopback address; refusing test operation.");
+  if (!isExactLoopbackAddress(identity.clientAddress)) refuse("PostgreSQL client address is not an exact loopback address; refusing test operation.");
   // A Docker host-port mapping can expose 127.0.0.1:55432 while PostgreSQL
   // reports its in-container listener as 5432. A direct local test server may
   // instead report the mapped test port; no other server ports are accepted.

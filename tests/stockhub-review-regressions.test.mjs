@@ -12,9 +12,9 @@ async function source(name) {
 
 function executableValidationGroup(route) {
   const start = route.indexOf("function validationGroup(");
-  const end = route.indexOf("\n}\n\nfunction correctionHint", start);
+  const end = route.indexOf("\nfunction validationPresentation", start);
   assert.ok(start >= 0 && end > start, "validationGroup helper must be present in the receipt route");
-  const typedFunction = route.slice(start, end + 2);
+  const typedFunction = route.slice(start, end).trimEnd();
   const javascriptFunction = typedFunction.replace(
     /function validationGroup\(line:\s*\{[\s\S]*?\}\)\s*\{/,
     "function validationGroup(line) {",

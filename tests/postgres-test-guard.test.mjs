@@ -37,23 +37,31 @@ test("PostgreSQL guard accepts the isolated target and checks queried server ide
   assert.deepEqual(validateDatabaseIdentity(identity, target.parsed), identity);
 });
 
-test("PostgreSQL guard accepts a private Docker bridge server and the internal PostgreSQL port mapping", () => {
+test("PostgreSQL guard accepts only exact loopback addresses, with or without host CIDR notation", () => {
   const { parsed } = validateTestDatabaseUrls({ DATABASE_URL: testUrl, STOCKHUB_TEST_DATABASE_URL: testUrl });
-  const dockerIdentity = { ...identity, address: "172.17.0.2/32", clientAddress: "172.17.0.1/32", port: 5432 };
-  assert.deepEqual(validateDatabaseIdentity(dockerIdentity, parsed), dockerIdentity);
+  for (const address of ["127.0.0.1", "127.0.0.1/32", "::1", "::1/128"]) {
+    for (const clientAddress of ["127.0.0.1", "127.0.0.1/32", "::1", "::1/128"]) {
+      const candidate = { ...identity, address, clientAddress };
+      assert.deepEqual(validateDatabaseIdentity(candidate, parsed), candidate, `${address} / ${clientAddress}`);
+    }
+  }
 });
 
-test("PostgreSQL guard refuses public/non-private server addresses", () => {
+test("PostgreSQL guard refuses private, public, and non-exact loopback addresses", () => {
   const { parsed } = validateTestDatabaseUrls({ DATABASE_URL: testUrl, STOCKHUB_TEST_DATABASE_URL: testUrl });
-  for (const address of ["8.8.8.8", "100.64.0.1", "172.32.0.1"]) {
-    assert.throws(() => validateDatabaseIdentity({ ...identity, address }, parsed), /RFC1918 private/);
+  for (const address of [
+    "10.0.0.1", "10.0.0.1/32", "172.17.0.2", "172.17.0.2/32", "192.168.1.2/32",
+    "8.8.8.8", "8.8.8.8/32", "100.64.0.1", "172.32.0.1", "127.0.0.2/32",
+    "127.0.0.1/8", "127.0.0.1/31", "::1/64", "::1/127", "2001:db8::1/128",
+  ]) {
+    assert.throws(() => validateDatabaseIdentity({ ...identity, address }, parsed), /loopback/i, address);
   }
 });
 
 test("PostgreSQL guard rejects malformed or out-of-range inet prefixes", () => {
   const { parsed } = validateTestDatabaseUrls({ DATABASE_URL: testUrl, STOCKHUB_TEST_DATABASE_URL: testUrl });
-  for (const address of ["172.17.0.2/33", "172.17.0.2/-1", "172.17.0.2/32/1", "172.17.0.2/not-a-prefix"]) {
-    assert.throws(() => validateDatabaseIdentity({ ...identity, address }, parsed), /RFC1918 private/);
+  for (const address of ["127.0.0.1/33", "127.0.0.1/-1", "127.0.0.1/32/1", "127.0.0.1/not-a-prefix", "::1/129"]) {
+    assert.throws(() => validateDatabaseIdentity({ ...identity, address }, parsed), /loopback/i);
   }
 });
 

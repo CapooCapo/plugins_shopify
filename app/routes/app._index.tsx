@@ -5,11 +5,12 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getGraphQLData } from "../utils/shopify-graphql.server";
 import { OverviewDashboard } from "../components/OverviewDashboard";
+import { loadOverviewAnalytics } from "../utils/overview-analytics.server";
 
 export type ProductCount = { count: number; precision: "EXACT" | "AT_LEAST" };
 
 export type OverviewData = {
-  shop: { name: string; myshopifyDomain: string };
+  shop: { name: string; myshopifyDomain: string; ianaTimezone?: string; currencyCode?: string };
   all: ProductCount;
   active: ProductCount;
   draft: ProductCount;
@@ -46,7 +47,9 @@ export function summarizeImportBatchStatusCounts(groups: ImportBatchStatusCount[
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session, scopes } = await authenticate.admin(request);
+  const url = new URL(request.url);
+  const range: 7 | 30 = url.searchParams.get("range") === "7" ? 7 : 30;
   const importsPromise: Promise<ImportOverview | null> = Promise.all([
     prisma.importBatch.groupBy({
       by: ["status"],
@@ -77,6 +80,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     attention,
   })).catch(() => null);
 
+  let data: OverviewData | null = null;
+  let error: string | null = null;
   try {
     const response = await admin.graphql(
       `#graphql
@@ -84,6 +89,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           shop {
             name
             myshopifyDomain
+            ianaTimezone
+            currencyCode
           }
           all: productsCount(limit: null) {
             count
@@ -99,25 +106,30 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
         }`,
     );
-    const data = await getGraphQLData<OverviewData>(response);
-    return { data, error: null, imports: await importsPromise };
+    data = await getGraphQLData<OverviewData>(response);
   } catch {
-    return {
-      data: null,
-      imports: await importsPromise,
-      error:
-        "Shopify product data could not be loaded. Confirm the app has read_products access and try again.",
-    };
+    error = "Shopify product data could not be loaded. Confirm the app has read_products access and try again.";
   }
+
+  const analytics = await loadOverviewAnalytics({
+    admin,
+    scopes,
+    shop: session.shop,
+    range,
+    timeZone: data?.shop.ianaTimezone ?? null,
+    currencyCode: data?.shop.currencyCode ?? null,
+    signal: request.signal,
+  });
+  return { data, error, imports: await importsPromise, analytics };
 };
 
 export default function Overview() {
-  const { data, error, imports } = useLoaderData<typeof loader>();
+  const { data, error, imports, analytics } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
 
   return (
     <s-page inlineSize="large">
-      <OverviewDashboard data={data} error={error} imports={imports} loading={navigation.state === "loading"} />
+      <OverviewDashboard data={data} error={error} imports={imports} analytics={analytics} loading={navigation.state === "loading"} />
     </s-page>
   );
 }

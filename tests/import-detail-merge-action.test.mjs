@@ -7,12 +7,14 @@ const detailRoute = new URL("../app/routes/app.imports.history.$batchId.tsx", im
 
 test("PREVIEWED eligible receipt exposes a primary Merge action below line-item filters", async () => {
   const source = await readFile(detailRoute, "utf8");
-  const groupStart = source.indexOf('<div className="stockhub-receipt-actions" role="group" aria-label="Receipt actions">');
+  const groupStart = source.indexOf('<div className="stockhub-receipt-header__actions" role="group" aria-label="Receipt actions">');
   const mergeActionStart = source.indexOf('<div className="stockhub-merge-action stockhub-merge-bar">');
+  const lineResultsStart = source.indexOf('<p className="stockhub-line-results"', mergeActionStart);
 
   assert.ok(groupStart >= 0 && mergeActionStart > groupStart, "receipt verification action wrapper and line-item Merge action must be rendered");
-  const actionGroup = source.slice(groupStart, source.indexOf("      {mergeDisabledReason", groupStart));
-  const mergeAction = source.slice(mergeActionStart, source.indexOf("        <s-text>{filteredLines.length}", mergeActionStart));
+  assert.ok(lineResultsStart > mergeActionStart, "the current result count follows the line-item action area");
+  const actionGroup = source.slice(groupStart, source.indexOf("      </header>", groupStart));
+  const mergeAction = source.slice(mergeActionStart, lineResultsStart);
 
   // Representative eligible PREVIEWED state: all required grants verified, no blocked
   // rows, and at least one mergeable line. The guard below ensures that this state is
@@ -41,11 +43,17 @@ test("PREVIEWED eligible receipt exposes a primary Merge action below line-item 
   assert.doesNotMatch(actionGroup, /<s-button-group\b/, "Form wrappers must not be nested in a Polaris button group");
   assert.match(actionGroup, /<Form method="post">[\s\S]*?Verify Shopify State[\s\S]*?<\/Form>/,
     "the read-only verification action must remain a POST form");
-  assert.ok(source.indexOf("label=\"Search line items\"") < mergeActionStart && mergeActionStart < source.indexOf("<s-text>{filteredLines.length}"),
+  assert.ok(source.indexOf("label=\"Search line items\"") < mergeActionStart && mergeActionStart < lineResultsStart,
     "Merge/Resume must appear immediately below the line-item filters and before the results/table");
-  assert.match(mergeAction, /role="dialog" aria-label="Confirm inventory merge"[\s\S]*?<Form method="post">[\s\S]*?name="intent" value=\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}[\s\S]*?name="confirmed" value="yes"[\s\S]*?name="confirmedCount"[\s\S]*?Confirm merge of \{eligibleCount\} rows[\s\S]*?<\/Form>/,
-    "Merge/Resume must retain its explicit confirmation dialog and original POST fields");
+  assert.match(source, /eligibleCount > 0 \|\| draftEditable \? <div className="stockhub-merge-action stockhub-merge-bar">/,
+    "the terminal state omits the sticky merge bar while draft editing can still expose revalidation");
+  assert.match(source, /eligibleCount > 0 && !mergeConfirming \? <s-button type="button" variant="primary" disabled=\{mergeDisabled\} onClick=\{\(\) => setMergeConfirmationRevision\(mergeEligibilityRevision\)\}/,
+    "an eligible receipt opens confirmation against the current row-state revision");
+  assert.match(mergeAction, /mergeConfirming \? <div className="stockhub-merge-confirmation" role="dialog" aria-label=\{`Confirm \$\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}`\}[\s\S]*?<Form method="post">[\s\S]*?name="intent" value=\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}[\s\S]*?name="confirmed" value="yes"[\s\S]*?name="confirmedCount" value=\{eligibleCount\}[\s\S]*?Confirm \{batch\.status === "PREVIEWED" \? "merge" : "resume"\} of \{eligibleCount\} rows[\s\S]*?<\/Form>/,
+    "Merge/Resume must retain an explicit confirmation dialog and original POST fields");
   assert.match(mergeAction, /name="confirmedCount"/);
+  assert.match(source, /const mergeConfirming = eligibleCount > 0 && mergeConfirmationRevision === mergeEligibilityRevision/,
+    "zero eligibility and receipt revision changes hide any stale open dialog immediately");
   assert.match(mergeAction, /blocked row\(s\) will remain attached to this receipt/);
 });
 
@@ -65,6 +73,7 @@ test("draft CRUD is tenant/state/version guarded, revalidates rows, and never ca
   assert.match(detail, /draftAddLine/);
   assert.match(detail, /draftEditLine/);
   assert.match(detail, /draftDeleteLine/);
-  assert.match(detail, /Draft — not sent to Shopify/);
+  assert.match(detail, /Prepare product draft in Product Catalog[\s\S]*?does not create a Shopify product/,
+    "the missing-SKU path remains a local catalog draft flow and cannot create a Shopify product");
   assert.match(merge, /Explicitly confirmed partial imports may contain validation-blocked rows/);
 });

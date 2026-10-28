@@ -112,6 +112,22 @@ body.stockhub-app-frame::before {
   gap: 24px;
 }
 
+.stockhub-overview-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.stockhub-overview-panel {
+  min-width: 0;
+  border: 1px solid var(--stockhub-border);
+  border-radius: 12px;
+  background: var(--stockhub-surface);
+  padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
 .stockhub-overview-header {
   display: flex;
   justify-content: space-between;
@@ -149,6 +165,336 @@ body.stockhub-app-frame::before {
 
 .stockhub-overview-header-action {
   padding-top: 20px;
+}
+
+.stockhub-overview-header-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  min-width: min(100%, 340px);
+  padding-top: 8px;
+}
+
+.stockhub-overview-range,
+.stockhub-chart-switch {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--stockhub-border);
+  border-radius: 8px;
+  background: var(--stockhub-surface);
+  padding: 3px;
+}
+
+.stockhub-overview-range a,
+.stockhub-chart-switch button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--stockhub-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 6px 10px;
+  text-decoration: none;
+}
+
+.stockhub-overview-range a[aria-current="page"],
+.stockhub-chart-switch button[aria-pressed="true"] {
+  background: #eaf1ff;
+  color: var(--stockhub-brand-primary);
+}
+
+.stockhub-chart-switch button:focus-visible,
+.stockhub-overview-range a:focus-visible,
+.stockhub-chart-bar-track:focus-visible {
+  outline: 3px solid var(--stockhub-brand-secondary);
+  outline-offset: 2px;
+}
+
+.stockhub-overview-refresh {
+  display: flex;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--stockhub-muted);
+  font-size: 12px;
+}
+
+.stockhub-overview-refresh a {
+  color: var(--stockhub-brand-primary);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.stockhub-overview-analytics {
+  gap: 16px;
+}
+
+.stockhub-overview-section-heading--analytics {
+  margin-bottom: 0;
+}
+
+.stockhub-overview-currency {
+  color: var(--stockhub-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.stockhub-overview-sales-metrics {
+  gap: 12px;
+}
+
+.stockhub-overview-metric--revenue { border-top: 3px solid var(--stockhub-brand-primary); }
+.stockhub-overview-metric--orders { border-top: 3px solid var(--stockhub-brand-secondary); }
+.stockhub-overview-metric--units { border-top: 3px solid #5e7c69; }
+.stockhub-overview-metric--low-stock { border-top: 3px solid #a76b12; }
+
+.stockhub-overview-trend-row,
+.stockhub-overview-ranking-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
+  align-items: stretch;
+  gap: 14px;
+}
+
+.stockhub-overview-trend-row > .stockhub-overview-panel {
+  align-self: start;
+}
+
+.stockhub-overview-ranking-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stockhub-overview-trend,
+.stockhub-overview-inventory,
+.stockhub-overview-ranking-grid > section {
+  min-width: 0;
+  padding: 16px 18px;
+}
+
+.stockhub-overview-analytics-heading {
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.stockhub-overview-analytics-heading h2 {
+  font-size: 17px;
+}
+
+.stockhub-overview-analytics-heading p {
+  margin-top: 3px;
+}
+
+.stockhub-analytics-notice {
+  margin: 0;
+  border-left: 3px solid var(--stockhub-brand-secondary);
+  border-radius: 4px;
+  background: #edf4ff;
+  color: #1e3a5f;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 9px 11px;
+}
+
+.stockhub-analytics-notice--partial {
+  border-left-color: var(--stockhub-warning);
+  background: #fff8e8;
+  color: #624300;
+}
+
+.stockhub-analytics-notice--error {
+  border-left-color: var(--stockhub-error);
+  background: #fff2f0;
+  color: #7a1d16;
+}
+
+.stockhub-analytics-empty {
+  display: grid;
+  min-height: 144px;
+  place-items: center;
+  border: 1px dashed var(--stockhub-border);
+  border-radius: 8px;
+  color: var(--stockhub-muted);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 20px;
+  text-align: center;
+}
+
+.stockhub-chart-measure-label {
+  margin: 10px 0 0;
+  color: var(--stockhub-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stockhub-chart-plot {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  min-width: 0;
+  min-height: 170px;
+  border-bottom: 1px solid var(--stockhub-border);
+  padding: 12px 2px 0;
+}
+
+.stockhub-chart-day {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.stockhub-chart-bar-track {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100%;
+  height: 136px;
+  min-width: 0;
+  border: 0;
+  border-radius: 4px 4px 0 0;
+  background: transparent;
+  cursor: help;
+  padding: 0 1px;
+}
+
+.stockhub-chart-bar-track:disabled {
+  cursor: default;
+}
+
+.stockhub-chart-bar {
+  display: block;
+  width: min(100%, 24px);
+  min-height: 0;
+  border-radius: 4px 4px 0 0;
+  transition: height 0.18s ease;
+}
+
+.stockhub-chart-bar--revenue { background: var(--stockhub-brand-primary); }
+.stockhub-chart-bar--orders { background: #27826b; }
+.stockhub-chart-bar--units { background: #b17621; }
+
+.stockhub-chart-date {
+  display: block;
+  min-height: 22px;
+  overflow: hidden;
+  color: var(--stockhub-muted);
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.stockhub-inventory-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.stockhub-inventory-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  border-radius: 8px;
+  background: #f5f8fb;
+  padding: 10px 12px;
+}
+
+.stockhub-inventory-summary span {
+  color: var(--stockhub-muted);
+  font-size: 12px;
+}
+
+.stockhub-inventory-summary strong {
+  color: var(--stockhub-ink);
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.stockhub-overview-ranking {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stockhub-overview-ranking li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  border-top: 1px solid var(--stockhub-border);
+  padding: 10px 0;
+}
+
+.stockhub-overview-ranking li:first-child { border-top: 0; }
+
+.stockhub-overview-ranking > li > img,
+.stockhub-ranking-image-placeholder {
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  border-radius: 7px;
+  background: #f0f4f8;
+  object-fit: cover;
+}
+
+.stockhub-ranking-image-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--stockhub-muted);
+  font-size: 20px;
+}
+
+.stockhub-overview-ranking-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.stockhub-overview-ranking-copy strong,
+.stockhub-overview-ranking-copy > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stockhub-overview-ranking-copy strong {
+  color: var(--stockhub-ink);
+  font-size: 13px;
+}
+
+.stockhub-overview-ranking-copy a {
+  color: var(--stockhub-brand-primary);
+  text-decoration: none;
+}
+
+.stockhub-overview-ranking-copy a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.stockhub-overview-ranking-copy > span {
+  color: var(--stockhub-muted);
+  font-size: 11px;
+}
+
+.stockhub-overview-ranking-value {
+  flex: none;
+  color: var(--stockhub-ink);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: right;
 }
 
 .stockhub-current-shop {
@@ -207,83 +553,97 @@ body.stockhub-app-frame::before {
   margin: 0;
 }
 
-.stockhub-receipt-summary-wrap {
-  width: 100%;
+.stockhub-receipt-progress-summary {
+  display: grid;
+  gap: 12px;
+  margin-block: 12px 16px;
+}
+
+.stockhub-receipt-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stockhub-receipt-summary-card {
+  display: grid;
   min-width: 0;
-  overflow-x: auto;
+  min-height: 128px;
+  align-content: start;
+  gap: 7px;
   border: 1px solid var(--stockhub-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--stockhub-surface);
+  padding: 14px 16px;
 }
 
-.stockhub-receipt-summary {
-  width: 100%;
-  border-collapse: collapse;
+.stockhub-receipt-summary-card--primary {
+  border-top: 3px solid var(--stockhub-brand-primary);
+}
+
+.stockhub-receipt-summary-card > span {
+  color: var(--stockhub-muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.stockhub-receipt-summary-card > strong {
   color: var(--stockhub-ink);
-  font-size: 14px;
-  text-align: start;
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
 }
 
-.stockhub-receipt-summary caption {
-  padding: 10px 14px;
-  background: #edf3ff;
-  color: var(--stockhub-brand-primary);
-  font-size: 14px;
-  font-weight: 700;
-  text-align: start;
+.stockhub-receipt-summary-card > strong small {
+  color: var(--stockhub-muted);
+  font-size: 15px;
+  font-weight: 500;
 }
 
-.stockhub-receipt-summary th,
-.stockhub-receipt-summary td {
-  padding: 8px 14px;
-  border-top: 1px solid var(--stockhub-border);
-  vertical-align: middle;
-}
-
-.stockhub-receipt-summary thead th {
-  background: #f7f9fc;
+.stockhub-receipt-summary-card > p {
+  margin: 0;
   color: var(--stockhub-muted);
   font-size: 12px;
-  font-weight: 600;
-  text-align: start;
+  line-height: 1.45;
 }
 
-.stockhub-receipt-summary tbody th {
-  width: 75%;
-  font-weight: 500;
-  overflow-wrap: anywhere;
-  text-align: start;
+.stockhub-receipt-operation-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.stockhub-receipt-summary-count {
-  display: inline-block;
-  min-width: 2.25em;
+.stockhub-receipt-operation-details > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--stockhub-border);
   border-radius: 999px;
-  padding: 2px 9px;
-  font-weight: 700;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.stockhub-receipt-summary-count--success {
-  background: #e8f5ed;
-  color: var(--stockhub-success);
-}
-
-.stockhub-receipt-summary-count--warning {
-  background: #fff5dc;
-  color: var(--stockhub-warning);
-}
-
-.stockhub-receipt-summary-count--error {
-  background: #fceceb;
-  color: var(--stockhub-error);
-}
-
-.stockhub-receipt-summary-count--neutral {
-  background: #f1f5f9;
+  background: var(--stockhub-surface-subdued, #f7f8fa);
+  padding: 5px 10px;
   color: var(--stockhub-muted);
+  font-size: 12px;
 }
+
+.stockhub-receipt-operation-details .is-error { border-color: #fecdca; background: #fef3f2; color: var(--stockhub-error); }
+.stockhub-receipt-operation-details .is-warning { border-color: #f5dfaa; background: #fff8e8; color: var(--stockhub-warning); }
+.stockhub-receipt-summary-note { margin: 0; color: var(--stockhub-muted); font-size: 12px; line-height: 1.5; }
+
+.stockhub-receipt-terminal {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--stockhub-border);
+  border-inline-start: 4px solid #73839a;
+  border-radius: 9px;
+  background: var(--stockhub-surface-subdued, #f7f8fa);
+  padding: 12px 14px;
+}
+
+.stockhub-receipt-terminal strong { color: var(--stockhub-ink); }
+.stockhub-receipt-terminal p { margin: 0; color: var(--stockhub-muted); font-size: 13px; line-height: 1.5; }
+.stockhub-receipt-terminal--success { border-inline-start-color: var(--stockhub-success); background: #f1faf4; }
+.stockhub-receipt-terminal--attention { border-inline-start-color: var(--stockhub-warning); background: #fffaf0; }
 
 .stockhub-overview-section-heading {
   display: flex;
@@ -322,8 +682,8 @@ body.stockhub-app-frame::before {
 
 .stockhub-overview-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .stockhub-overview-metric {
@@ -348,12 +708,16 @@ body.stockhub-app-frame::before {
   border-top: 3px solid var(--stockhub-brand-primary);
 }
 
-.stockhub-overview-metric--imports {
+.stockhub-overview-metric--active {
   border-top: 3px solid var(--stockhub-brand-secondary);
 }
 
-.stockhub-overview-metric--attention {
-  border-top: 3px solid var(--stockhub-warning);
+.stockhub-overview-metric--drafts {
+  border-top: 3px solid #8a6116;
+}
+
+.stockhub-overview-metric--imports {
+  border-top: 3px solid #73839a;
 }
 
 .stockhub-metric-label {
@@ -372,6 +736,12 @@ body.stockhub-app-frame::before {
 .stockhub-metric-note,
 .stockhub-overview-breakdown {
   margin-top: auto;
+  color: var(--stockhub-muted);
+  font-size: 13px;
+}
+
+.stockhub-overview-other-products {
+  margin: 10px 0 0;
   color: var(--stockhub-muted);
   font-size: 13px;
 }
@@ -422,6 +792,49 @@ body.stockhub-app-frame::before {
   padding: 12px 0;
 }
 
+.stockhub-overview-import-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stockhub-overview-import-list li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--stockhub-border);
+  padding: 13px 0;
+}
+
+.stockhub-overview-import-list li:first-child { border-top: 0; padding-top: 2px; }
+.stockhub-overview-import-list li:last-child { padding-bottom: 2px; }
+
+.stockhub-overview-import-primary {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  color: var(--stockhub-ink);
+  text-decoration: none;
+}
+
+.stockhub-overview-import-primary strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.stockhub-overview-import-primary span {
+  color: var(--stockhub-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.stockhub-overview-import-primary:hover strong { color: var(--stockhub-brand-primary); text-decoration: underline; text-underline-offset: 3px; }
+.stockhub-overview-import-list .stockhub-status { flex: none; }
+
 .stockhub-overview-shortcuts > span {
   color: var(--stockhub-muted);
   font-size: 13px;
@@ -457,11 +870,7 @@ body.stockhub-app-frame::before {
 }
 
 .stockhub-overview-recent {
-  border: 1px solid var(--stockhub-border);
-  border-radius: 12px;
-  background: var(--stockhub-surface);
-  padding: 16px 20px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+  margin: 0;
 }
 
 .stockhub-overview-table-wrap {
@@ -1118,6 +1527,166 @@ body.stockhub-app-frame::before {
   .stockhub-merge-bar { bottom: 0; border-radius: 8px 8px 0 0; }
 }
 
+/* Receipt detail structural workspace: compact metadata, grouped validation,
+   explicit execution state, and a dedicated mobile row-card representation. */
+.stockhub-receipt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 2px 0 16px;
+  border: 1px solid var(--stockhub-border);
+  border-inline-start: 4px solid var(--stockhub-brand-primary);
+  border-radius: 10px;
+  background: var(--stockhub-surface, #fff);
+  padding: 12px 16px;
+}
+.stockhub-receipt-header__main { min-width: 0; flex: 1; }
+.stockhub-receipt-back { display: inline-flex; margin-bottom: 5px; color: var(--stockhub-brand-primary); font-size: 13px; font-weight: 650; text-decoration: none; }
+.stockhub-receipt-back:hover { text-decoration: underline; }
+.stockhub-receipt-heading-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.stockhub-receipt-heading-row s-heading { display: block; font-size: 20px; font-weight: 700; line-height: 1.2; }
+.stockhub-receipt-eyebrow { display: block; margin-bottom: 3px; color: var(--stockhub-muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.stockhub-receipt-metadata { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 8px 0 0; }
+.stockhub-receipt-metadata > div { display: flex; gap: 5px; font-size: 12px; }
+.stockhub-receipt-metadata dt { color: var(--stockhub-muted); }
+.stockhub-receipt-metadata dd { margin: 0; color: var(--stockhub-ink); font-weight: 600; }
+.stockhub-receipt-header__actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.stockhub-receipt-draft-note { margin: 0 0 14px; border-inline-start: 3px solid #2c6ecb; border-radius: 5px; background: #f1f6fc; padding: 9px 12px; color: #244568; font-size: 13px; }
+.stockhub-quality-summary,
+.stockhub-validation-issues { margin-block: 14px; }
+.stockhub-quality-summary__heading,
+.stockhub-validation-issues__heading,
+.stockhub-receipt-lines__heading { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+.stockhub-quality-summary__heading h2,
+.stockhub-validation-issues__heading h2,
+.stockhub-receipt-lines__heading h2 { margin: 0; color: var(--stockhub-ink); font-size: 18px; line-height: 1.25; }
+.stockhub-quality-summary__heading > span,
+.stockhub-validation-issues__total { color: var(--stockhub-muted); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stockhub-quality-summary__intro,
+.stockhub-validation-issues__intro { margin: 5px 0 10px; color: var(--stockhub-muted); font-size: 13px; }
+.stockhub-draft-status-summary { margin: 10px 0 0; gap: 10px; }
+.stockhub-draft-status-summary button { min-height: 76px; align-items: center; gap: 12px; padding: 12px 14px; text-align: left; transition: border-color 120ms ease, box-shadow 120ms ease; }
+.stockhub-draft-status-summary button > strong { min-width: 36px; font-size: 25px; font-variant-numeric: tabular-nums; }
+.stockhub-draft-status-summary button > span { display: grid; gap: 3px; }
+.stockhub-draft-status-summary button b { font-size: 13px; }
+.stockhub-draft-status-summary button small { color: var(--stockhub-muted); font-size: 11px; font-weight: 500; }
+.stockhub-draft-status-summary button:hover { border-color: var(--stockhub-brand-secondary); }
+.stockhub-validation-issues { border: 1px solid #ecd8a2; border-radius: 9px; background: #fffcf3; padding: 14px; }
+.stockhub-validation-issue-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.stockhub-validation-issue-list li { display: flex; align-items: center; justify-content: space-between; gap: 18px; border-top: 1px solid #eee5cd; padding: 12px 0; }
+.stockhub-validation-issue-list li:first-child { border-top: 0; }
+.stockhub-validation-issue-list__content { display: flex; min-width: 0; align-items: flex-start; gap: 10px; }
+.stockhub-validation-issue-list__count { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #fbe5e5; color: #9f2525; font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.stockhub-validation-issue-list__content > div { min-width: 0; }
+.stockhub-validation-issue-list__content strong { display: block; color: var(--stockhub-ink); font-size: 13px; }
+.stockhub-validation-issue-list__content p { margin: 3px 0; color: #604d20; font-size: 12px; line-height: 1.4; }
+.stockhub-validation-issue-list__content small { color: var(--stockhub-muted); font-size: 11px; }
+.stockhub-text-action { border: 0; background: transparent; color: var(--stockhub-brand-primary); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.stockhub-text-action:focus-visible { outline: 3px solid var(--stockhub-brand-secondary); outline-offset: 3px; }
+.stockhub-receipt-lines { min-width: 0; margin-top: 20px; scroll-margin-top: 20px; }
+.stockhub-receipt-lines__heading { margin-bottom: 10px; }
+.stockhub-receipt-lines__heading p { margin: 0; color: var(--stockhub-muted); font-size: 12px; }
+.stockhub-line-toolbar { grid-template-columns: minmax(88px, auto) minmax(0, 1fr) auto; align-items: end; gap: 12px; margin: 0 0 10px; padding: 12px; }
+.stockhub-line-toolbar__summary { display: grid; gap: 1px; align-content: center; min-width: 70px; color: var(--stockhub-muted); font-size: 11px; white-space: nowrap; }
+.stockhub-line-toolbar__summary strong { color: var(--stockhub-ink); font-size: 20px; font-variant-numeric: tabular-nums; }
+.stockhub-line-toolbar__filters { grid-template-columns: minmax(180px, 1.35fr) repeat(2, minmax(135px, 1fr)) auto; gap: 8px; }
+.stockhub-line-toolbar__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 7px; }
+.stockhub-line-toolbar__active-filter { grid-column: 2 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--stockhub-muted); font-size: 12px; }
+.stockhub-merge-disabled-note { margin: 0 0 10px; border-inline-start: 3px solid #c88719; background: #fffbf2; padding: 9px 12px; color: #614b20; font-size: 13px; }
+.stockhub-merge-bar { gap: 14px; padding: 10px 12px; }
+.stockhub-merge-bar__summary { display: grid; gap: 2px; }
+.stockhub-merge-bar__summary strong { font-size: 14px; }
+.stockhub-merge-bar__summary span,
+.stockhub-merge-bar__summary small { color: var(--stockhub-muted); font-size: 11px; }
+.stockhub-line-results { margin: 6px 0; color: var(--stockhub-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.stockhub-lines-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--stockhub-border); border-radius: 9px; background: var(--stockhub-surface, #fff); }
+.stockhub-lines-table { width: 100%; border-collapse: collapse; table-layout: fixed; color: var(--stockhub-ink); font-size: 12px; }
+.stockhub-lines-table__product { width: 30%; }
+.stockhub-lines-table__sku { width: 15%; }
+.stockhub-lines-table__quantity { width: 8%; }
+.stockhub-lines-table__quality { width: 14%; }
+.stockhub-lines-table__execution { width: 20%; }
+.stockhub-lines-table__actions { width: 13%; }
+.stockhub-lines-table thead { background: #f5f7f9; }
+.stockhub-lines-table th { border-bottom: 1px solid var(--stockhub-border); padding: 10px 9px; color: #475467; font-size: 11px; font-weight: 700; text-align: left; white-space: nowrap; }
+.stockhub-lines-table tbody tr + tr { border-top: 1px solid #e8ebef; }
+.stockhub-lines-table tbody tr:hover { background: #fafcff; }
+.stockhub-lines-table td { min-width: 0; padding: 10px 9px; vertical-align: middle; overflow-wrap: anywhere; }
+.stockhub-lines-table td:first-child { padding-inline-start: 12px; }
+.stockhub-line-sku { color: #344054; font-size: 11px; overflow-wrap: anywhere; }
+.stockhub-lines-table__quantity-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stockhub-line-execution { display: grid; justify-items: start; gap: 3px; }
+.stockhub-line-execution small { color: var(--stockhub-muted); font-size: 10px; line-height: 1.3; }
+.stockhub-lines-table__actions-cell { text-align: right; }
+.stockhub-lines-table__actions-cell .stockhub-row-actions { justify-content: flex-end; }
+.stockhub-row-actions { gap: 5px; }
+.stockhub-mobile-lines { display: none; margin: 0; padding: 0; list-style: none; }
+.stockhub-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.stockhub-lines-empty { margin: 0; border: 1px dashed var(--stockhub-border); border-radius: 8px; padding: 20px; color: var(--stockhub-muted); text-align: center; }
+
+@media (max-width: 1100px) {
+  .stockhub-line-toolbar { grid-template-columns: 72px minmax(0, 1fr); }
+  .stockhub-line-toolbar__filters { grid-column: 2; grid-template-columns: minmax(150px, 1.3fr) repeat(2, minmax(120px, 1fr)) auto; }
+  .stockhub-line-toolbar__actions { grid-column: 2; justify-content: flex-start; }
+  .stockhub-line-toolbar__active-filter { grid-column: 2; }
+}
+
+@media (max-width: 760px) {
+  .stockhub-receipt-header { align-items: flex-start; padding: 12px; }
+  .stockhub-receipt-header__actions { align-self: center; }
+  .stockhub-quality-summary__heading,
+  .stockhub-validation-issues__heading { align-items: flex-start; }
+  .stockhub-draft-status-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .stockhub-draft-status-summary button { min-height: 78px; align-items: flex-start; flex-direction: column; gap: 3px; padding: 9px; }
+  .stockhub-draft-status-summary button > strong { font-size: 22px; }
+  .stockhub-draft-status-summary button > span { gap: 1px; }
+  .stockhub-draft-status-summary button b { font-size: 11px; }
+  .stockhub-draft-status-summary button small { font-size: 10px; }
+  .stockhub-validation-issue-list li { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .stockhub-line-toolbar { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+  .stockhub-line-toolbar__summary { grid-template-columns: auto 1fr; align-items: baseline; gap: 6px; }
+  .stockhub-line-toolbar__summary strong { font-size: 17px; }
+  .stockhub-line-toolbar__filters { grid-column: auto; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .stockhub-line-toolbar__filters > :first-child { grid-column: 1 / -1; }
+  .stockhub-line-toolbar__actions { grid-column: auto; justify-content: flex-start; }
+  .stockhub-line-toolbar__active-filter { grid-column: auto; }
+  .stockhub-lines-table-wrap { display: none; }
+  .stockhub-mobile-lines { display: grid; gap: 9px; }
+  .stockhub-mobile-line-card { display: grid; gap: 10px; border: 1px solid var(--stockhub-border); border-radius: 9px; background: var(--stockhub-surface, #fff); padding: 12px; }
+  .stockhub-mobile-line-card__identity { display: grid; min-width: 0; gap: 4px; }
+  .stockhub-mobile-line-card__identity > code { color: var(--stockhub-muted); font-size: 11px; overflow-wrap: anywhere; }
+  .stockhub-mobile-line-card__badges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .stockhub-mobile-line-card__badges > span,
+  .stockhub-mobile-line-card__meta > span { display: grid; justify-items: start; gap: 4px; min-width: 0; }
+  .stockhub-mobile-line-card__badges small,
+  .stockhub-mobile-line-card__meta small { color: var(--stockhub-muted); font-size: 10px; font-weight: 600; }
+  .stockhub-mobile-line-card__meta { display: grid; grid-template-columns: .6fr 1.4fr; gap: 8px; border-top: 1px solid #eef0f2; padding-top: 8px; }
+  .stockhub-mobile-line-card__meta strong { font-size: 12px; }
+  .stockhub-mobile-line-card__issue { display: -webkit-box; margin: 0; overflow: hidden; color: #604d20; font-size: 11px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .stockhub-mobile-line-card__actions { display: flex; justify-content: flex-end; border-top: 1px solid #eef0f2; padding-top: 8px; }
+  .stockhub-mobile-line-card__actions .stockhub-icon-action { width: 44px; height: 44px; }
+  .stockhub-merge-bar { position: static; box-shadow: none; }
+}
+
+@media (max-width: 420px) {
+  .stockhub-receipt-header { flex-direction: column; gap: 10px; }
+  .stockhub-receipt-header__actions { align-self: stretch; }
+  .stockhub-receipt-header__actions form,
+  .stockhub-receipt-header__actions s-button { width: 100%; }
+  .stockhub-receipt-metadata { gap: 4px 12px; }
+  .stockhub-quality-summary__heading,
+  .stockhub-validation-issues__heading { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .stockhub-quality-summary__intro,
+  .stockhub-validation-issues__intro { font-size: 12px; }
+  .stockhub-draft-status-summary button { min-height: 82px; }
+  .stockhub-draft-status-summary button b { line-height: 1.2; }
+  .stockhub-receipt-lines__heading { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .stockhub-line-toolbar__filters { grid-template-columns: minmax(0, 1fr); }
+  .stockhub-line-toolbar__filters > :first-child { grid-column: auto; }
+  .stockhub-mobile-line-card { padding: 10px; }
+}
+
 .stockhub-receipt-progress {
   display: grid;
   gap: 8px;
@@ -1603,6 +2172,16 @@ body.stockhub-app-frame::before {
   }
 }
 
+@media (max-width: 1000px) {
+  .stockhub-overview-workspace { grid-template-columns: minmax(0, 1fr); }
+  .stockhub-overview-trend-row { grid-template-columns: minmax(0, 1fr); }
+  .stockhub-receipt-summary-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .stockhub-overview-ranking-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
 @media (max-width: 600px) {
   .stockhub-page {
     padding: 0 10px 22px;
@@ -1633,14 +2212,111 @@ body.stockhub-app-frame::before {
     padding-top: 0;
   }
 
+  .stockhub-overview-header-tools {
+    justify-content: flex-start;
+    min-width: 0;
+    width: 100%;
+    gap: 10px;
+    padding-top: 0;
+  }
+
+  .stockhub-overview-refresh {
+    flex: 1 1 150px;
+    flex-wrap: wrap;
+  }
+
+  .stockhub-overview-header-tools > s-button {
+    flex: 1 0 100%;
+  }
+
+  .stockhub-overview-section-heading--analytics {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .stockhub-overview-currency {
+    text-align: left;
+  }
+
+  .stockhub-overview-trend,
+  .stockhub-overview-inventory,
+  .stockhub-overview-ranking-grid > section {
+    padding: 13px;
+  }
+
+  .stockhub-overview-analytics-heading {
+    gap: 8px;
+  }
+
+  .stockhub-chart-plot {
+    gap: 1px;
+    min-height: 154px;
+    padding-inline: 0;
+  }
+
+  .stockhub-chart-bar-track {
+    height: 120px;
+    padding-inline: 0;
+  }
+
+  .stockhub-chart-date {
+    font-size: 9px;
+  }
+
+  .stockhub-chart-switch button {
+    padding-inline: 7px;
+    font-size: 12px;
+  }
+
+  .stockhub-inventory-summary {
+    gap: 8px;
+  }
+
   .stockhub-overview-metrics {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
   }
 
   .stockhub-overview-metric {
-    min-height: 116px;
-    padding: 14px 16px;
+    min-height: 110px;
+    padding: 12px;
+  }
+
+  .stockhub-overview-sales-metrics .stockhub-metric-value {
+    font-size: 20px;
+    overflow-wrap: anywhere;
+  }
+
+  .stockhub-overview-workspace {
+    gap: 12px;
+  }
+
+  .stockhub-overview-panel {
+    padding: 14px;
+  }
+
+  .stockhub-overview-import-list li {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .stockhub-overview-import-primary {
+    flex: 1 1 150px;
+  }
+
+  .stockhub-receipt-summary-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stockhub-receipt-summary-card {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+  }
+
+  .stockhub-receipt-summary-card > p {
+    grid-column: 1 / -1;
   }
 
   .stockhub-overview-shortcuts {

@@ -72,7 +72,7 @@ export function compareCatalogGroups(rows: readonly CatalogCompareRow[], existin
       const existingCombinations = new Set(productVariants.map((variant) => combinationKey(variant.selectedOptions)));
       const proposedCombinations = missing.map((row) => combinationKey(optionNames.map((name) => ({ name, value: name.toLowerCase() === "size" ? row.size ?? "" : name.toLowerCase() === "color" ? row.color ?? "" : "" }))));
       if (proposedCombinations.some((key) => existingCombinations.has(key)) || new Set(proposedCombinations).size !== proposedCombinations.length) { result.push(conflict("A proposed variant duplicates an existing or draft option combination.")); continue; }
-      result.push({ groupId, groupTitle: title, disposition: "UPDATE", eligible: false, reason: "Existing product has a new Size/Color combination. Proposed variant addition requires explicit review.", productId: matchedProductId, variantId: null, changes, rowIds: members.map((row) => row.id) });
+      result.push({ groupId, groupTitle: title, disposition: "CONFLICT", eligible: false, reason: "This existing Shopify product has a new Size/Color combination, but this workflow cannot add variants to existing products. Resolve it in Shopify before confirming.", productId: matchedProductId, variantId: null, changes, rowIds: members.map((row) => row.id) });
       continue;
     }
     const dedupedChanges = [...new Map(changes.map((change) => [`${change.rowId ?? ""}:${change.field}:${change.current ?? ""}:${change.proposed ?? ""}:${change.action}`, change])).values()];
