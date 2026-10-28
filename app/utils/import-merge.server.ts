@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import type { PrismaClient, ImportBatch, ImportLine } from "@prisma/client";
+import { createHash, randomUUID } from "node:crypto";
+import type { PrismaClient, ImportBatch, ImportLine, ImportMergeApproval } from "@prisma/client";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 const MAX_MERGE_LINES = 50;
@@ -129,6 +129,10 @@ export type MergeImportBatchResult = {
   batchId: string;
   status: string;
   lines: ImportLineResult[];
+  approvalId: string | null;
+  approvalStatus: string | null;
+  chunkNumber: number;
+  continueRequired: boolean;
 };
 
 export class MergeImportError extends Error {
@@ -146,6 +150,10 @@ type MergeInput = {
   batchId: string;
   admin: AdminApiContext;
   prisma: PrismaClient;
+  intent?: "merge" | "continue" | "resume";
+  confirmedLineIds?: string[];
+  expectedRevision?: number;
+  approvalId?: string;
   now?: () => Date;
 };
 
@@ -972,91 +980,445 @@ async function runLine(
   }
 }
 
-export async function mergeImportBatch({
-  shop,
-  batchId,
-  admin,
-  prisma,
-  now = () => new Date(),
-}: MergeInput): Promise<MergeImportBatchResult> {
+type ApprovalSnapshotLine = {
+  id: string;
+  rowNumber: number;
+  sku: string;
+  title: string | null;
+  description: string | null;
+  price: string | null;
+  imageUrl: string | null;
+  quantity: number | null;
+  operationType: string;
+  operationId: string;
+  idempotencyKey: string;
+  productId: string | null;
+  variantId: string | null;
+  inventoryItemId: string | null;
+  expectedQuantity: number | null;
+};
+
+type ApprovalSnapshot = { version: 1; lines: ApprovalSnapshotLine[] };
+
+function snapshotLine(line: ImportLine): ApprovalSnapshotLine {
+  return {
+    id: line.id,
+    rowNumber: line.rowNumber,
+    sku: line.sku,
+    title: line.title,
+    description: line.description,
+    price: line.price,
+    imageUrl: line.imageUrl,
+    quantity: line.quantity,
+    operationType: line.operationType,
+    operationId: line.operationId,
+    idempotencyKey: line.idempotencyKey,
+    productId: line.productId,
+    variantId: line.variantId,
+    inventoryItemId: line.inventoryItemId,
+    expectedQuantity: line.expectedQuantity,
+  };
+}
+
+function fingerprint(value: unknown) {
+  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+}
+
+function makeApprovalSnapshot(lines: ImportLine[]): { snapshot: ApprovalSnapshot; json: string; fingerprint: string } {
+  const snapshot: ApprovalSnapshot = {
+    version: 1,
+    lines: [...lines].sort((left, right) => left.rowNumber - right.rowNumber).map(snapshotLine),
+  };
+  return { snapshot, json: JSON.stringify(snapshot), fingerprint: fingerprint(snapshot) };
+}
+
+function readApprovalSnapshot(approval: ImportMergeApproval): ApprovalSnapshot {
+  let parsed: unknown;
+  try { parsed = JSON.parse(approval.snapshotJson); }
+  catch { throw new MergeImportError("The saved Merge approval snapshot is unreadable. No new Shopify work was started.", "APPROVAL_SNAPSHOT_INVALID"); }
+  if (!parsed || typeof parsed !== "object" || (parsed as ApprovalSnapshot).version !== 1 || !Array.isArray((parsed as ApprovalSnapshot).lines)) {
+    throw new MergeImportError("The saved Merge approval snapshot is invalid. No new Shopify work was started.", "APPROVAL_SNAPSHOT_INVALID");
+  }
+  const snapshot = parsed as ApprovalSnapshot;
+  if (fingerprint(snapshot) !== approval.fingerprint || new Set(snapshot.lines.map((line) => line.id)).size !== snapshot.lines.length) {
+    throw new MergeImportError("The saved Merge approval fingerprint does not match. No new Shopify work was started.", "APPROVAL_FINGERPRINT_MISMATCH");
+  }
+  return snapshot;
+}
+
+function isPreviewEligible(line: ImportLine) {
+  return line.status === "PREVIEWED" && line.stage === "PREPARED" && line.operationType !== "BLOCKED";
+}
+
+function isResumeEligible(line: ImportLine) {
+  return !["SUCCEEDED", "BLOCKED"].includes(line.status) && line.operationType !== "BLOCKED";
+}
+
+function batchStatusFromLines(lines: ImportLine[]) {
+  if (lines.some((line) => ["RUNNING", "UNCERTAIN"].includes(line.status))) return "UNCERTAIN";
+  if (lines.some((line) => line.status === "PREVIEWED")) {
+    return lines.some((line) => line.status === "SUCCEEDED") ? "PARTIAL" : "PREVIEWED";
+  }
+  const successful = lines.filter((line) => line.status === "SUCCEEDED").length;
+  if (lines.length > 0 && successful === lines.length) return "COMPLETED";
+  if (successful > 0) return "PARTIAL";
+  return "FAILED";
+}
+
+function resultFor(
+  batchId: string,
+  lines: ImportLine[],
+  status: string,
+  approvalId: string | null,
+  approvalStatus: string | null,
+  chunkNumber: number,
+  continueRequired = false,
+): MergeImportBatchResult {
+  return {
+    batchId,
+    status,
+    lines: lines.map(resultLine),
+    approvalId,
+    approvalStatus,
+    chunkNumber,
+    continueRequired,
+  };
+}
+
+async function findApproval(prisma: PrismaClient, shop: string, batchId: string, id: string) {
+  return prisma.importMergeApproval.findFirst({ where: { id, shop, batchId } });
+}
+
+async function invalidateStaleRunningApproval(input: {
+  prisma: PrismaClient;
+  batch: ImportBatch;
+  approval: ImportMergeApproval;
+  staleAt: Date;
+  now: () => Date;
+}) {
+  return input.prisma.$transaction(async (transaction) => {
+    const invalidatedAt = input.now();
+    const invalidated = await transaction.importBatch.updateMany({
+      where: {
+        id: input.batch.id,
+        shop: input.approval.shop,
+        status: "RUNNING",
+        revision: input.approval.receiptRevision,
+        activeMergeApprovalId: input.approval.id,
+        // Match the exact lease observed by this request. If its owner renewed
+        // while we waited, this compare-and-swap must fail closed.
+        updatedAt: { equals: input.batch.updatedAt, lt: input.staleAt },
+      },
+      data: { status: "UNCERTAIN", updatedAt: invalidatedAt },
+    });
+    if (invalidated.count !== 1) return false;
+
+    const stopped = await transaction.importMergeApproval.updateMany({
+      where: {
+        id: input.approval.id,
+        shop: input.approval.shop,
+        batchId: input.approval.batchId,
+        status: "ACTIVE",
+      },
+      data: { status: "STOPPED", updatedAt: invalidatedAt },
+    });
+    if (stopped.count !== 1) {
+      throw new MergeImportError(
+        "The saved Merge approval changed while its expired worker lease was being invalidated. Refresh and explicitly resume to reconcile it.",
+        "APPROVAL_CHANGED",
+      );
+    }
+    return true;
+  });
+}
+
+async function setApprovalState(
+  prisma: PrismaClient,
+  approval: ImportMergeApproval,
+  nextStatus: string,
+  processedCount = 0,
+  incrementChunk = false,
+) {
+  const increments = {
+    ...(incrementChunk ? { chunkNumber: { increment: 1 } } : {}),
+    ...(processedCount ? { processedCount: { increment: processedCount } } : {}),
+  };
+  const allowedStatus = nextStatus === "ACTIVE"
+    ? "ACTIVE"
+    : { in: ["ACTIVE", "PAUSED"] };
+  const update = await prisma.importMergeApproval.updateMany({
+    where: { id: approval.id, shop: approval.shop, batchId: approval.batchId, status: allowedStatus },
+    data: { ...increments, status: nextStatus },
+  });
+  if (update.count === 1) return findApproval(prisma, approval.shop, approval.batchId, approval.id);
+
+  const current = await findApproval(prisma, approval.shop, approval.batchId, approval.id);
+  if (current?.status === "PAUSED" && nextStatus === "ACTIVE") {
+    await prisma.importMergeApproval.updateMany({
+      where: { id: approval.id, shop: approval.shop, batchId: approval.batchId, status: "PAUSED" },
+      data: increments,
+    });
+    return findApproval(prisma, approval.shop, approval.batchId, approval.id);
+  }
+  return current;
+}
+
+async function createAndClaimApproval(input: {
+  batch: ImportBatch & { lines: ImportLine[] };
+  shop: string;
+  batchId: string;
+  prisma: PrismaClient;
+  now: () => Date;
+  intent: "merge" | "resume";
+  expectedRevision: number;
+  snapshot: ApprovalSnapshot;
+  snapshotJson: string;
+  snapshotFingerprint: string;
+}) {
+  const approvalId = randomUUID();
+  const claimAt = input.now();
+  await input.prisma.$transaction(async (transaction) => {
+    if (input.batch.activeMergeApprovalId) {
+      const active = await transaction.importMergeApproval.findFirst({
+        where: { id: input.batch.activeMergeApprovalId, shop: input.shop, batchId: input.batchId },
+      });
+      if (active && ["ACTIVE", "PAUSED"].includes(active.status)) {
+        throw new MergeImportError("A saved Merge approval is still active. Continue or pause that approval before starting another.", "APPROVAL_ALREADY_ACTIVE");
+      }
+    }
+    await transaction.importMergeApproval.create({
+      data: {
+        id: approvalId,
+        shop: input.shop,
+        batchId: input.batchId,
+        mode: input.intent === "merge" ? "MERGE" : "RESUME",
+        status: "ACTIVE",
+        snapshotJson: input.snapshotJson,
+        fingerprint: input.snapshotFingerprint,
+        receiptRevision: input.expectedRevision,
+        chunkNumber: 0,
+        processedCount: 0,
+      },
+    });
+    const claimed = await transaction.importBatch.updateMany({
+      where: {
+        id: input.batchId,
+        shop: input.shop,
+        status: input.batch.status,
+        revision: input.expectedRevision,
+        updatedAt: input.batch.updatedAt,
+      },
+      data: { status: "RUNNING", updatedAt: claimAt, activeMergeApprovalId: approvalId },
+    });
+    if (claimed.count !== 1) {
+      throw new MergeImportError("This import changed after confirmation. Refresh, review the current eligible count, and confirm again.", "APPROVAL_STALE");
+    }
+  });
+  return { approvalId, claimAt };
+}
+
+async function failClaimedApproval(
+  worker: MergeWorkerInput,
+  approval: ImportMergeApproval,
+  lines: ImportLine[],
+  now: () => Date,
+  code: string,
+  message: string,
+): Promise<never> {
+  await setApprovalState(worker.prisma, approval, "STOPPED");
+  await saveBatchState(worker, batchStatusFromLines(lines), now, null);
+  throw new MergeImportError(message, code);
+}
+
+export async function mergeImportBatch(input: MergeInput): Promise<MergeImportBatchResult> {
+  const {
+    shop,
+    batchId,
+    admin,
+    prisma,
+    now = () => new Date(),
+    intent = "resume",
+    confirmedLineIds = [],
+    approvalId: requestedApprovalId,
+  } = input;
   let batch = await prisma.importBatch.findFirst({
     where: { id: batchId, shop },
     include: { lines: { orderBy: { rowNumber: "asc" } } },
   });
   if (!batch) throw new MergeImportError("Import batch was not found for this store.", "BATCH_NOT_FOUND");
-  if (batch.lines.length === 0 || batch.lines.length > MAX_MERGE_LINES) {
-    throw new MergeImportError(
-      `A merge must contain between 1 and ${MAX_MERGE_LINES} rows. Split larger CSV files.`,
-      "BATCH_LIMIT",
-    );
-  }
-  if (batch.status === "COMPLETED") {
-    return {
-      batchId,
-      status: batch.status,
-      lines: batch.lines.map(resultLine),
-    };
+
+  if (batch.status === "COMPLETED" && intent !== "continue") {
+    const previous = batch.activeMergeApprovalId
+      ? await findApproval(prisma, shop, batchId, batch.activeMergeApprovalId)
+      : null;
+    return resultFor(batchId, batch.lines, batch.status, previous?.id ?? null, previous?.status ?? null, previous?.chunkNumber ?? 0);
   }
 
-  const staleAt = new Date(now().getTime() - 15 * 60 * 1000);
-  const claimAt = now();
-  const claim = await prisma.importBatch.updateMany({
-    where: {
-      id: batchId,
+  let approval: ImportMergeApproval | null = null;
+  let leaseAt: Date;
+  if (intent === "continue") {
+    if (!requestedApprovalId || requestedApprovalId !== batch.activeMergeApprovalId) {
+      throw new MergeImportError("This continuation does not match the receipt's active approval.", "APPROVAL_NOT_FOUND");
+    }
+    approval = await findApproval(prisma, shop, batchId, requestedApprovalId);
+    if (!approval) throw new MergeImportError("The saved Merge approval was not found for this receipt.", "APPROVAL_NOT_FOUND");
+    if (approval.status === "COMPLETED" || approval.status === "STOPPED") {
+      return resultFor(batchId, batch.lines, batch.status, approval.id, approval.status, approval.chunkNumber);
+    }
+    if (approval.status !== "ACTIVE") {
+      throw new MergeImportError("This approved Merge is paused. Explicitly resume the saved approval before continuing.", "APPROVAL_PAUSED");
+    }
+    if ((batch.revision ?? 0) !== approval.receiptRevision) {
+      await setApprovalState(prisma, approval, "STOPPED");
+      throw new MergeImportError("The receipt changed after approval. Review the current eligible rows and confirm again.", "APPROVAL_STALE");
+    }
+    const staleAt = new Date(now().getTime() - 15 * 60 * 1000);
+    if (batch.status === "RUNNING") {
+      if (batch.updatedAt >= staleAt) {
+        throw new MergeImportError("This import is already being processed. Refresh before continuing.", "BATCH_ALREADY_RUNNING");
+      }
+      const invalidated = await invalidateStaleRunningApproval({ prisma, batch, approval, staleAt, now });
+      if (!invalidated) {
+        throw new MergeImportError("The previous Merge worker renewed its lease. Refresh before continuing.", "BATCH_ALREADY_RUNNING");
+      }
+      throw new MergeImportError(
+        "The previous Merge worker's lease expired while Shopify work may still be in flight. Automatic continuation stopped; explicitly Resume to reconcile the outcome before any retry.",
+        "RESUME_REQUIRED",
+      );
+    }
+    leaseAt = now();
+    const claim = await prisma.importBatch.updateMany({
+      where: {
+        id: batchId,
+        shop,
+        revision: approval.receiptRevision,
+        activeMergeApprovalId: approval.id,
+        status: { in: ["PREVIEWED", "PARTIAL", "FAILED", "UNCERTAIN"] },
+      },
+      data: { status: "RUNNING", updatedAt: leaseAt },
+    });
+    if (claim.count !== 1) {
+      throw new MergeImportError("This import is already being processed. Refresh before continuing.", "BATCH_ALREADY_RUNNING");
+    }
+  } else {
+    if (!confirmedLineIds.length) {
+      throw new MergeImportError("Confirm at least one currently eligible row before processing this receipt.", "BATCH_EMPTY");
+    }
+    if (batch.status === "RUNNING") {
+      throw new MergeImportError("This import is already being processed. Refresh before retrying.", "BATCH_ALREADY_RUNNING");
+    }
+    const expectedRevision = input.expectedRevision ?? batch.revision ?? 0;
+    if ((batch.revision ?? 0) !== expectedRevision) {
+      throw new MergeImportError("The receipt changed after confirmation. Review the current eligible rows and confirm again.", "APPROVAL_STALE");
+    }
+    const lineById = new Map(batch.lines.map((line) => [line.id, line]));
+    const uniqueConfirmedIds = [...new Set(confirmedLineIds)];
+    if (uniqueConfirmedIds.length !== confirmedLineIds.length) {
+      throw new MergeImportError("The approved row set is invalid. Refresh and confirm again.", "APPROVAL_INVALID");
+    }
+    const eligible = intent === "merge"
+      ? batch.lines.filter(isPreviewEligible)
+      : batch.lines.filter(isResumeEligible);
+    const eligibleIds = eligible.map((line) => line.id).sort();
+    const confirmedEligibleIds = uniqueConfirmedIds.filter((id) => eligibleIds.includes(id)).sort();
+    if (confirmedEligibleIds.length !== eligibleIds.length || eligibleIds.some((id, index) => id !== confirmedEligibleIds[index])) {
+      throw new MergeImportError("The approved rows no longer match the receipt's current eligible rows. Refresh and confirm again.", "APPROVAL_STALE");
+    }
+    const selectedLines = confirmedEligibleIds.map((id) => lineById.get(id)!).sort((left, right) => left.rowNumber - right.rowNumber);
+    const snapshot = makeApprovalSnapshot(selectedLines);
+    const claimed = await createAndClaimApproval({
+      batch,
       shop,
-      OR: [
-        { status: { in: ["PREVIEWED", "PARTIAL", "FAILED", "UNCERTAIN"] } },
-        { status: "RUNNING", updatedAt: { lt: staleAt } },
-      ],
-    },
-    data: { status: "RUNNING", updatedAt: claimAt },
-  });
-  if (claim.count !== 1) {
-    throw new MergeImportError("This import is already being processed. Refresh before retrying.", "BATCH_ALREADY_RUNNING");
+      batchId,
+      prisma,
+      now,
+      intent,
+      expectedRevision,
+      snapshot: snapshot.snapshot,
+      snapshotJson: snapshot.json,
+      snapshotFingerprint: snapshot.fingerprint,
+    });
+    approval = await findApproval(prisma, shop, batchId, claimed.approvalId);
+    if (!approval) throw new MergeImportError("The Merge approval could not be loaded after creation.", "APPROVAL_NOT_FOUND");
+    leaseAt = claimed.claimAt;
   }
 
+  const worker: MergeWorkerInput = { shop, batchId, admin, prisma, now, leaseAt };
   const claimedBatch = await prisma.importBatch.findFirst({
     where: { id: batchId, shop },
     include: { lines: { orderBy: { rowNumber: "asc" } } },
   });
-  if (!claimedBatch) {
-    throw new MergeImportError("Import batch was not found for this store.", "BATCH_NOT_FOUND");
-  }
+  if (!claimedBatch) throw new MergeImportError("Import batch was not found for this store.", "BATCH_NOT_FOUND");
   batch = claimedBatch;
-  const worker: MergeWorkerInput = { shop, batchId, admin, prisma, now, leaseAt: claimAt };
-  let lines = batch.lines;
-  if (lines.length === 0 || lines.length > MAX_MERGE_LINES) {
-    await saveBatchState(worker, "FAILED", now);
-    throw new MergeImportError(
-      `A merge must contain between 1 and ${MAX_MERGE_LINES} rows. Split larger CSV files.`,
-      "BATCH_LIMIT",
-    );
+  const currentApproval = await findApproval(prisma, shop, batchId, approval!.id);
+  if (!currentApproval) throw new MergeImportError("The saved Merge approval disappeared during processing.", "APPROVAL_NOT_FOUND");
+  if (currentApproval.status === "PAUSED") {
+    const state = batchStatusFromLines(batch.lines);
+    await saveBatchState(worker, state, now, state === "COMPLETED" ? now() : null);
+    return resultFor(batchId, batch.lines, state, currentApproval.id, currentApproval.status, currentApproval.chunkNumber);
   }
-  // Explicitly confirmed partial imports may contain validation-blocked rows.
-  // They remain attached to the receipt; the processing loop skips them below.
-  // The action layer requires a current eligible-row count confirmation.
+
+  let snapshot: ApprovalSnapshot;
+  try { snapshot = readApprovalSnapshot(currentApproval); }
+  catch (error) {
+    return failClaimedApproval(worker, currentApproval, batch.lines, now,
+      error instanceof MergeImportError ? error.code : "APPROVAL_SNAPSHOT_INVALID",
+      error instanceof Error ? error.message : "The saved Merge approval snapshot is invalid.");
+  }
+  const linesById = new Map(batch.lines.map((line) => [line.id, line]));
+  for (const saved of snapshot.lines) {
+    const current = linesById.get(saved.id);
+    if (!current || JSON.stringify(snapshotLine(current)) !== JSON.stringify(saved)) {
+      return failClaimedApproval(worker, currentApproval, batch.lines, now, "APPROVAL_SNAPSHOT_CHANGED",
+        "An approved row disappeared or changed after confirmation. No further Shopify work was started; review and confirm the current receipt.");
+    }
+  }
+
+  const approvedIds = new Set(snapshot.lines.map((line) => line.id));
+  const currentlyEligible = batch.lines.filter(currentApproval.mode === "MERGE" ? isPreviewEligible : isResumeEligible);
+  const approvedPending = snapshot.lines
+    .map((saved) => linesById.get(saved.id)!)
+    .filter((line) => currentApproval.mode === "MERGE" ? line.status === "PREVIEWED" : isResumeEligible(line));
+  if (currentlyEligible.some((line) => !approvedIds.has(line.id))
+    || approvedPending.some((line) => !currentlyEligible.some((candidate) => candidate.id === line.id))) {
+    return failClaimedApproval(worker, currentApproval, batch.lines, now, "APPROVAL_SNAPSHOT_CHANGED",
+      "The receipt's current eligible rows no longer match the approved snapshot. No further Shopify work was started; confirm the current rows again.");
+  }
+  if (currentApproval.mode === "MERGE" && snapshot.lines.some((saved) => {
+    const line = linesById.get(saved.id)!;
+    return !["PREVIEWED", "SUCCEEDED", "BLOCKED"].includes(line.status);
+  })) {
+    return failClaimedApproval(worker, currentApproval, batch.lines, now, "RESUME_REQUIRED",
+      "The approved Merge contains a failed or uncertain outcome. Automatic continuation stopped; use explicit Resume to reconcile it.");
+  }
+
+  const eligibleSnapshotLines = snapshot.lines
+    .map((saved) => linesById.get(saved.id)!)
+    .filter((line) => currentApproval.mode === "MERGE" ? isPreviewEligible(line) : isResumeEligible(line))
+    .sort((left, right) => left.rowNumber - right.rowNumber);
+  const selectedLines = eligibleSnapshotLines.slice(0, MAX_MERGE_LINES);
+  if (!selectedLines.length) {
+    const state = batchStatusFromLines(batch.lines);
+    const finalApproval = await setApprovalState(prisma, currentApproval, "COMPLETED");
+    await saveBatchState(worker, state, now, state === "COMPLETED" ? now() : null);
+    return resultFor(batchId, batch.lines, state, currentApproval.id, finalApproval?.status ?? "COMPLETED", finalApproval?.chunkNumber ?? currentApproval.chunkNumber);
+  }
 
   let verifiedLocation: { id: string; name: string; isActive: boolean } | undefined;
   try {
-    verifiedLocation = (await readLocations(admin)).find(
-      (location) => location.id === batch.locationId,
-    );
+    verifiedLocation = (await readLocations(admin)).find((location) => location.id === batch.locationId);
   } catch (error) {
+    await setApprovalState(prisma, currentApproval, "STOPPED");
     await saveBatchState(worker, "UNCERTAIN", now);
-    throw new MergeImportError(
-      error instanceof Error ? error.message : "Unable to verify the selected location.",
-      "LOCATION_LOOKUP_FAILED",
-    );
+    throw new MergeImportError(error instanceof Error ? error.message : "Unable to verify the selected location.", "LOCATION_LOOKUP_FAILED");
   }
   if (!verifiedLocation || !verifiedLocation.isActive) {
     const detail = verifiedLocation
       ? "The selected Shopify location is inactive."
       : "The selected location is not available to this authenticated store.";
-    for (const line of lines) {
-      if (line.status === "SUCCEEDED" || line.status === "BLOCKED") continue;
-      const mayHaveReachedShopify =
-        line.status === "UNCERTAIN" ||
-        (line.stage !== "PREPARED" && ["RUNNING", "FAILED"].includes(line.status));
+    for (const line of selectedLines) {
+      const mayHaveReachedShopify = line.status === "UNCERTAIN"
+        || (line.stage !== "PREPARED" && ["RUNNING", "FAILED"].includes(line.status));
       const reconciliationDetail = `${detail} Reconcile this line before retrying; its previous Shopify mutation outcome may be unknown.`;
       await markLine(worker, line.id, now, mayHaveReachedShopify
         ? {
@@ -1072,59 +1434,56 @@ export async function mergeImportBatch({
             errorDetail: `${detail} No mutation was attempted for this line.`,
           });
     }
-    lines = await prisma.importLine.findMany({ where: { batchId }, orderBy: { rowNumber: "asc" } });
-    const successful = lines.some((line) => line.status === "SUCCEEDED");
-    const uncertain = lines.some((line) => line.status === "UNCERTAIN");
-    const status = successful ? "PARTIAL" : uncertain ? "UNCERTAIN" : "FAILED";
-    await saveBatchState(worker, status, now);
-    return { batchId, status, lines: lines.map(resultLine) };
-  }
-
-  for (const line of lines) {
-    if (line.status === "SUCCEEDED" || line.status === "BLOCKED") continue;
-    try {
-      await renewLease(worker, now);
-      await runLine(worker, batch, line, now);
-    } catch (error) {
-      if (error instanceof MergeLeaseLostError) {
-        const currentBatch = await prisma.importBatch.findFirst({
-          where: { id: batchId, shop },
-          include: { lines: { orderBy: { rowNumber: "asc" } } },
+  } else {
+    for (const line of selectedLines) {
+      try {
+        await renewLease(worker, now);
+        await runLine(worker, batch, line, now);
+      } catch (error) {
+        if (error instanceof MergeLeaseLostError) {
+          const currentBatch = await prisma.importBatch.findFirst({
+            where: { id: batchId, shop },
+            include: { lines: { orderBy: { rowNumber: "asc" } } },
+          });
+          const liveApproval = await findApproval(prisma, shop, batchId, currentApproval.id);
+          return resultFor(batchId, currentBatch?.lines ?? [], currentBatch?.status ?? "UNCERTAIN",
+            currentApproval.id, liveApproval?.status ?? "STOPPED", liveApproval?.chunkNumber ?? currentApproval.chunkNumber);
+        }
+        await markLine(worker, line.id, now, {
+          status: "UNCERTAIN",
+          errorCode: "LINE_EXECUTION_UNCERTAIN",
+          errorDetail: error instanceof Error ? error.message : "Line execution outcome is unknown.",
         });
-        return {
-          batchId,
-          status: currentBatch?.status ?? "UNCERTAIN",
-          lines: currentBatch?.lines.map(resultLine) ?? [],
-        };
       }
-      await markLine(worker, line.id, now, {
-        status: "UNCERTAIN",
-        errorCode: "LINE_EXECUTION_UNCERTAIN",
-        errorDetail: error instanceof Error ? error.message : "Line execution outcome is unknown.",
-      });
     }
   }
 
-  lines = await prisma.importLine.findMany({
-    where: { batchId },
-    orderBy: { rowNumber: "asc" },
-  });
-  const successful = lines.filter((line) => line.status === "SUCCEEDED").length;
-  const hasUnresolvedOutcome = lines.some((line) =>
-    ["PREVIEWED", "RUNNING", "UNCERTAIN"].includes(line.status),
-  );
-  const status = hasUnresolvedOutcome
-    ? "UNCERTAIN"
-    : successful === lines.length
+  const lines = await prisma.importLine.findMany({ where: { batchId }, orderBy: { rowNumber: "asc" } });
+  const postChunkById = new Map(lines.map((line) => [line.id, line]));
+  const snapshotLines = snapshot.lines.map((saved) => postChunkById.get(saved.id)).filter((line): line is ImportLine => Boolean(line));
+  const chunkLines = selectedLines.map((line) => postChunkById.get(line.id)).filter((line): line is ImportLine => Boolean(line));
+  const automaticStop = snapshotLines.some((line) => ["FAILED", "UNCERTAIN", "RUNNING"].includes(line.status))
+    || chunkLines.length !== selectedLines.length;
+  const pendingSnapshot = snapshotLines.filter((line) => currentApproval.mode === "MERGE"
+    ? isPreviewEligible(line)
+    : isResumeEligible(line));
+  const outsideEligible = lines.some((line) => (currentApproval.mode === "MERGE" ? isPreviewEligible(line) : isResumeEligible(line)) && !approvedIds.has(line.id));
+  const nextStatus = automaticStop || outsideEligible
+    ? "STOPPED"
+    : pendingSnapshot.length === 0
       ? "COMPLETED"
-      : successful > 0
-        ? "PARTIAL"
-        : "FAILED";
-  await saveBatchState(
-    worker,
-    status,
-    now,
-    hasUnresolvedOutcome ? null : now(),
+      : "ACTIVE";
+  const savedApproval = await setApprovalState(
+    prisma,
+    currentApproval,
+    nextStatus,
+    selectedLines.length,
+    true,
   );
-  return { batchId, status, lines: lines.map(resultLine) };
+  const status = batchStatusFromLines(lines);
+  await saveBatchState(worker, status, now, status === "COMPLETED" ? now() : null);
+  const approvalStatus = savedApproval?.status ?? nextStatus;
+  const continueRequired = approvalStatus === "ACTIVE" && pendingSnapshot.length > 0 && !outsideEligible && !automaticStop;
+  return resultFor(batchId, lines, status, currentApproval.id, approvalStatus,
+    savedApproval?.chunkNumber ?? currentApproval.chunkNumber + 1, continueRequired);
 }

@@ -8,4 +8,4 @@ The catalog CSV draft flow is intentionally separate from inventory imports. It 
 
 The additive migration adds only these two tables, their shop-scoped uniqueness/indexes, and a composite `(shop, batchId) -> (shop, id)` cascade foreign key. It has been generated at `prisma/migrations/20261027000000_catalog_import/migration.sql` and **has not been applied**. Review and apply it only to an isolated local database after review; never apply it to production/staging as part of this PR.
 
-CSV upload is limited to 1,000,000 UTF-8 bytes and 250 rows. Draft deletion cascades to its lines; no cleanup job or auto-expiration is introduced.
+CSV upload is limited to 1,000,000 UTF-8 bytes and 1,000 data rows. Draft deletion cascades to its lines; no cleanup job or auto-expiration is introduced.

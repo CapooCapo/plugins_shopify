@@ -21,6 +21,7 @@ function makeBatch({ id = "batch-1", shop = SHOP, lines, status = "PREVIEWED" } 
     locationName: "Main warehouse",
     currencyCode: "VND",
     status,
+    revision: 0,
     actor: "merchant@example.test",
     createdAt: now,
     updatedAt: now,
@@ -102,6 +103,7 @@ function makePrisma({ batch, lines = batch.lines, beforeClaim, failSucceededLine
   const state = {
     batch: structuredClone({ ...batch, lines: undefined }),
     lines: structuredClone(lines),
+    approvals: [],
   };
   let claimHookRun = false;
 
@@ -160,6 +162,33 @@ function makePrisma({ batch, lines = batch.lines, beforeClaim, failSucceededLine
         const line = state.lines.find((candidate) => matchesWhere(candidate, where));
         if (!line) throw new Error("ImportLine not found");
         return structuredClone(line);
+      },
+    },
+    importMergeApproval: {
+      async findFirst({ where }) {
+        const approval = state.approvals.find((candidate) => matchesWhere(candidate, where));
+        return approval ? structuredClone(approval) : null;
+      },
+      async create({ data }) {
+        if (state.approvals.some((candidate) => candidate.id === data.id)) {
+          throw new Error("ImportMergeApproval id already exists");
+        }
+        const approval = structuredClone(data);
+        state.approvals.push(approval);
+        return structuredClone(approval);
+      },
+      async updateMany({ where, data }) {
+        const selected = state.approvals.filter((candidate) => matchesWhere(candidate, where));
+        for (const approval of selected) {
+          for (const [key, value] of Object.entries(data)) {
+            if (value && typeof value === "object" && "increment" in value) {
+              approval[key] = Number(approval[key] ?? 0) + Number(value.increment);
+            } else {
+              approval[key] = structuredClone(value);
+            }
+          }
+        }
+        return { count: selected.length };
       },
     },
     async $transaction(callback) {
@@ -290,8 +319,8 @@ function draftProduct(operationId = "operation-line-1", handle = "stockhub-opera
   };
 }
 
-function run(batch, admin, prisma, shop = SHOP) {
-  return mergeImportBatch({ shop, batchId: batch.id, admin, prisma, now: fixedNow });
+function run(batch, admin, prisma, shop = SHOP, confirmedLineIds = batch.lines.map((line) => line.id), intent = "resume", expectedRevision = batch.revision, approvalId) {
+  return mergeImportBatch({ shop, batchId: batch.id, admin, prisma, now: fixedNow, confirmedLineIds, intent, expectedRevision, approvalId });
 }
 
 test("existing SKU gets one positive incoming-stock adjustment and completed replay is a no-op", async () => {
@@ -708,7 +737,7 @@ test("a concurrent duplicate submission cannot claim a RUNNING batch", async () 
   assert.equal(calls.filter((call) => call.operationName === "StockHubAdjustIncoming").length, 1);
 });
 
-test("merge reloads the batch and lines after claiming against a concurrent preview replacement", async () => {
+test("a preview replacement after confirmation is not dispatched until it receives a fresh confirmation", async () => {
   const staleLine = makeLine({ id: "stale-line", sku: "SKU-OLD", quantity: 2 });
   const replacementLine = makeLine({ id: "replacement-line", sku: "SKU-NEW", quantity: 7 });
   const batch = makeBatch({ lines: [staleLine] });
@@ -718,6 +747,7 @@ test("merge reloads the batch and lines after claiming against a concurrent prev
       // Model a preview replacement that wins immediately before the RUNNING claim.
       current.batch.locationId = REPLACED_LOCATION_ID;
       current.batch.locationName = "Replacement warehouse";
+      current.batch.revision += 1;
       current.lines.splice(0, current.lines.length, structuredClone(replacementLine));
     },
   });
@@ -744,10 +774,18 @@ test("merge reloads the batch and lines after claiming against a concurrent prev
     },
   });
 
-  const result = await run(batch, admin, prisma);
+  await assert.rejects(
+    run(batch, admin, prisma, SHOP, [staleLine.id], "merge", 0),
+    /confirm|changed|eligible|missing/i,
+    "the claimed snapshot no longer contains the exact line ID the merchant confirmed",
+  );
+  assert.equal(calls.length, 0, "a replacement row must not inherit the stale confirmation");
+  assert.equal(state.lines[0].id, replacementLine.id);
+  assert.equal(state.lines[0].status, "PREVIEWED");
 
-  assert.equal(result.status, "COMPLETED");
-  assert.deepEqual(result.lines.map((line) => line.sku), ["SKU-NEW"]);
+  const freshConfirmation = await run(batch, admin, prisma, SHOP, [replacementLine.id], "merge", 1);
+  assert.equal(freshConfirmation.status, "COMPLETED");
+  assert.equal(freshConfirmation.lines[0].sku, "SKU-NEW");
   assert.equal(state.lines[0].status, "SUCCEEDED");
   const skuLookup = calls.find((call) => call.operationName === "StockHubRecheckSku");
   assert.equal(skuLookup.variables.query, 'sku:"SKU-NEW"');
@@ -757,10 +795,10 @@ test("merge reloads the batch and lines after claiming against a concurrent prev
   assert.equal(adjustment.variables.input.changes[0].locationId, REPLACED_LOCATION_ID);
 });
 
-test("merge rechecks the row limit after claim when a concurrent preview replacement grows the batch", async () => {
+test("rows appended after confirmation remain untouched until separately confirmed", async () => {
   const initialLine = makeLine({ id: "initial-line" });
   const batch = makeBatch({ lines: [initialLine] });
-  const replacementLines = Array.from({ length: 51 }, (_, index) => makeLine({
+  const appendedLines = Array.from({ length: 51 }, (_, index) => makeLine({
     id: `replacement-line-${index + 1}`,
     rowNumber: index + 2,
     sku: `SKU-${index + 1}`,
@@ -768,18 +806,230 @@ test("merge rechecks the row limit after claim when a concurrent preview replace
   const { prisma, state } = makePrisma({
     batch,
     beforeClaim(current) {
-      current.lines.splice(0, current.lines.length, ...structuredClone(replacementLines));
+      current.lines.push(...structuredClone(appendedLines));
+      current.batch.revision += 1;
     },
   });
-  const { admin, calls } = makeAdmin();
+  const { admin, calls } = makeAdmin({
+    skuResults(call) {
+      const sku = call.variables.query.match(/sku:\\?"([^"]+)/)?.[1];
+      return [existingVariant({ sku })];
+    },
+  });
 
   await assert.rejects(
-    run(batch, admin, prisma),
-    (error) => error.code === "BATCH_LIMIT",
+    run(batch, admin, prisma, SHOP, [initialLine.id], "merge", 0),
+    /revision|changed|confirm/i,
+    "new eligible rows after confirmation invalidate the entire approval snapshot before dispatch",
   );
+  assert.equal(state.lines.length, 52);
+  assert.ok(state.lines.every((line) => line.status === "PREVIEWED"),
+    "a changed snapshot leaves all rows untouched until a fresh approval");
+  assert.equal(calls.length, 0, "the stale initial approval must make no Shopify call");
 
-  assert.equal(state.lines.length, 51);
-  assert.equal(calls.length, 0, "no Shopify reads or writes should occur for an oversized claimed batch");
+  const approvedSnapshot = [...state.lines].map((line) => line.id);
+  const nextConfirmation = await run(batch, admin, prisma, SHOP, approvedSnapshot, "merge", 1);
+  assert.equal(nextConfirmation.lines.filter((line) => line.status === "SUCCEEDED").length, 50,
+    "the fresh approval includes appended rows but the service still bounds each chunk at 50");
+  assert.equal(calls.filter((call) => call.operationName === "StockHubAdjustIncoming").length, 50);
+  assert.equal(state.lines.filter((line) => line.status === "PREVIEWED").length, 2);
+});
+
+test("one 1,000-line confirmation advances its persisted snapshot in ≤50-line chunks without replaying successes", async () => {
+  const lines = Array.from({ length: 1000 }, (_, index) => makeLine({
+    id: `capacity-line-${String(index + 1).padStart(4, "0")}`,
+    batchId: "capacity-batch",
+    rowNumber: index + 2,
+    sku: `CAP-${String(index + 1).padStart(4, "0")}`,
+    quantity: 2,
+  }));
+  const batch = makeBatch({ id: "capacity-batch", lines });
+  const { prisma, state } = makePrisma({ batch });
+  const { admin, calls } = makeAdmin({
+    skuResults(call) {
+      const sku = call.variables.query.match(/sku:\\?"([^"]+)/)?.[1];
+      assert.ok(sku, `expected exact SKU lookup, got ${call.variables.query}`);
+      return [existingVariant({ sku })];
+    },
+  });
+  const lineIds = lines.map((line) => line.id);
+
+  let attempt = 1;
+  let result = await mergeImportBatch({
+    shop: SHOP,
+    batchId: batch.id,
+    admin,
+    prisma,
+    now: fixedNow,
+    intent: "merge",
+    expectedRevision: batch.revision,
+    confirmedLineIds: lineIds,
+  });
+  const approvalId = result.approvalId;
+  assert.ok(approvalId, "the initial merchant confirmation must create a durable approval identity");
+  assert.equal(result.chunkNumber, 1);
+  assert.equal(result.continueRequired, true);
+  assert.equal(result.approvalStatus, "ACTIVE");
+
+  while (result.continueRequired && attempt < 20) {
+    const beforeSuccessCount = state.lines.filter((line) => line.status === "SUCCEEDED").length;
+    const beforeAdjustmentCount = calls.filter((call) => call.operationName === "StockHubAdjustIncoming").length;
+    result = await mergeImportBatch({
+      shop: SHOP,
+      batchId: batch.id,
+      admin,
+      prisma,
+      now: fixedNow,
+      intent: "continue",
+      approvalId,
+    });
+    attempt += 1;
+
+    const afterSuccessCount = state.lines.filter((line) => line.status === "SUCCEEDED").length;
+    const afterAdjustmentCount = calls.filter((call) => call.operationName === "StockHubAdjustIncoming").length;
+    const newlyCompleted = afterSuccessCount - beforeSuccessCount;
+    assert.ok(newlyCompleted > 0, `bounded chunk ${attempt} must make persisted progress`);
+    assert.ok(newlyCompleted <= 50, `chunk ${attempt} completed ${newlyCompleted} lines, above the 50-line service bound`);
+    assert.equal(afterAdjustmentCount - beforeAdjustmentCount, newlyCompleted,
+      "each persisted success in this confirmed chunk has one corresponding inventory mutation");
+    assert.equal(result.approvalId, approvalId, "every continuation is bound to the original approval");
+    assert.equal(result.chunkNumber, attempt, "chunk order is monotonic and persisted");
+    assert.equal(result.lines.length, 1000, "the full receipt remains visible after every chunk");
+    assert.equal(result.lines[0].rowNumber, 2);
+    assert.equal(result.lines.at(-1).rowNumber, 1001);
+  }
+
+  assert.equal(attempt, 20, "one merchant confirmation must auto-advance through twenty bounded chunks");
+  assert.equal(result.continueRequired, false);
+  assert.equal(result.approvalStatus, "COMPLETED");
+  assert.ok(state.lines.every((line) => line.status === "SUCCEEDED"));
+  const writesBeforeReplay = calls.filter((call) => call.operationName === "StockHubAdjustIncoming").length;
+  const replay = await mergeImportBatch({
+    shop: SHOP,
+    batchId: batch.id,
+    admin,
+    prisma,
+    now: fixedNow,
+    intent: "continue",
+    approvalId,
+  });
+  assert.equal(replay.status, "COMPLETED");
+  assert.equal(replay.approvalStatus, "COMPLETED");
+  assert.equal(calls.filter((call) => call.operationName === "StockHubAdjustIncoming").length, writesBeforeReplay,
+    "replaying a successful chunk must not redispatch any completed line");
+  assert.equal(writesBeforeReplay, 1000);
+});
+
+test("a Pause accepted during an active chunk lets that chunk finish but prevents the next chunk", async () => {
+  const lines = Array.from({ length: 51 }, (_, index) => makeLine({
+    id: `pause-line-${String(index + 1).padStart(3, "0")}`,
+    batchId: "pause-batch",
+    rowNumber: index + 2,
+    sku: `PAUSE-${String(index + 1).padStart(3, "0")}`,
+  }));
+  const batch = makeBatch({ id: "pause-batch", lines });
+  const { prisma, state } = makePrisma({ batch });
+  const { admin, calls } = makeAdmin({
+    skuResults(call) {
+      const sku = call.variables.query.match(/sku:\\?"([^"]+)/)?.[1];
+      return [existingVariant({ sku })];
+    },
+    handlers: {
+      StockHubValidateLocation() {
+        // This is the deterministic interleaving: the route's independent
+        // Pause action wins after the chunk has claimed the batch but before
+        // its operations finish.
+        assert.equal(state.approvals.length, 1);
+        state.approvals[0].status = "PAUSED";
+        return graphQLResponse({ locations: {
+          nodes: [{ id: LOCATION_ID, name: "Main warehouse", isActive: true }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        } });
+      },
+    },
+  });
+
+  const firstChunk = await run(batch, admin, prisma, SHOP, lines.map((line) => line.id), "merge", 0);
+  assert.equal(firstChunk.approvalStatus, "PAUSED",
+    "the chunk completion CAS must preserve a Pause accepted while its worker was active");
+  assert.equal(firstChunk.continueRequired, false);
+  assert.equal(firstChunk.lines.filter((line) => line.status === "SUCCEEDED").length, 50,
+    "the already-running bounded chunk may finish; pause is not a rollback");
+  assert.equal(firstChunk.lines.filter((line) => line.status === "PREVIEWED").length, 1,
+    "no next chunk may start after the accepted pause");
+  assert.equal(state.approvals[0].processedCount, 50);
+
+  const writesAtPause = calls.filter((call) => call.operationName === "StockHubAdjustIncoming").length;
+  await assert.rejects(
+    mergeImportBatch({ shop: SHOP, batchId: batch.id, admin, prisma, now: fixedNow, intent: "continue", approvalId: firstChunk.approvalId }),
+    (error) => error.code === "APPROVAL_PAUSED",
+    "automatic continuation cannot advance a paused approval; only an explicit resume control may reactivate it",
+  );
+  assert.equal(calls.filter((call) => call.operationName === "StockHubAdjustIncoming").length, writesAtPause);
+});
+
+test("UNKNOWN stops automatic continuation; only explicit Resume can reconcile it", async () => {
+  const unknownLine = makeLine({ id: "unknown-in-first-chunk", sku: "UNKNOWN-1" });
+  const completedLine = makeLine({ id: "known-in-first-chunk", sku: "KNOWN-1" });
+  const batch = makeBatch({ lines: [unknownLine, completedLine] });
+  const { prisma, state } = makePrisma({ batch });
+  let unknownLookups = 0;
+  const { admin, calls } = makeAdmin({
+    skuResults(call) {
+      const sku = call.variables.query.match(/sku:\\?"([^"]+)/)?.[1];
+      if (sku === unknownLine.sku && ++unknownLookups > 1) {
+        const replacement = existingVariant({ sku });
+        replacement.id = "gid://shopify/ProductVariant/999";
+        replacement.product.id = "gid://shopify/Product/999";
+        replacement.inventoryItem.id = "gid://shopify/InventoryItem/999";
+        return [replacement];
+      }
+      return [existingVariant({ sku })];
+    },
+    handlers: {
+      StockHubAdjustIncoming(call) {
+        if (call.variables.key === unknownLine.idempotencyKey) {
+          throw new Error("Simulated timeout with unknown Shopify outcome");
+        }
+        return graphQLResponse({
+          inventoryAdjustQuantities: {
+            inventoryAdjustmentGroup: { id: "gid://shopify/InventoryAdjustmentGroup/100" },
+            userErrors: [],
+          },
+        });
+      },
+    },
+  });
+
+  const initial = await run(batch, admin, prisma, SHOP, [unknownLine.id, completedLine.id], "merge", 0);
+  const approvalId = initial.approvalId;
+  assert.ok(approvalId);
+  assert.equal(initial.lines.find((line) => line.id === unknownLine.id).status, "UNCERTAIN");
+  assert.equal(initial.lines.find((line) => line.id === completedLine.id).status, "SUCCEEDED");
+  assert.equal(initial.approvalStatus, "STOPPED");
+  assert.equal(initial.continueRequired, false,
+    "an uncertain result prevents the 1-click automatic flow from entering another chunk");
+  const unknownWritesBeforeContinuation = calls.filter((call) =>
+    call.operationName === "StockHubAdjustIncoming" && call.variables.key === unknownLine.idempotencyKey).length;
+
+  const automaticContinuation = await mergeImportBatch({
+    shop: SHOP, batchId: batch.id, admin, prisma, now: fixedNow,
+    intent: "continue", approvalId,
+  });
+  assert.equal(automaticContinuation.approvalStatus, "STOPPED");
+  assert.equal(calls.filter((call) => call.operationName === "StockHubAdjustIncoming" && call.variables.key === unknownLine.idempotencyKey).length,
+    unknownWritesBeforeContinuation,
+    "replaying automatic continuation after UNKNOWN must not redispatch the unknown operation");
+
+  const explicitResume = await run(batch, admin, prisma, SHOP, [unknownLine.id], "resume", 0);
+  assert.notEqual(explicitResume.lines.find((line) => line.id === unknownLine.id).status, "SUCCEEDED",
+    "Resume must not report a different Shopify variant as a successful reconciliation");
+  assert.equal(calls.filter((call) => call.operationName === "StockHubRecheckSku" && call.variables.query.includes(unknownLine.sku)).length, 2,
+    "explicit Resume performs a fresh Shopify lookup before deciding whether a retry is safe");
+  assert.equal(calls.filter((call) => call.operationName === "StockHubAdjustIncoming" && call.variables.key === unknownLine.idempotencyKey).length,
+    unknownWritesBeforeContinuation,
+    "a retry is not sent when reconciliation discovers a different variant target");
+  assert.notEqual(state.lines.find((line) => line.id === unknownLine.id).status, "SUCCEEDED");
 });
 
 test("partial failure preserves successful lines and resumes only unfinished rows", async () => {

@@ -178,6 +178,90 @@ test("Catalog upload, mapping preview, confirmation, and draft CRUD stay isolate
   assert.equal(await prisma.importBatch.count({ where: { shop } }), 0, "Catalog flow never creates an inventory ImportBatch");
 });
 
+test("PostgreSQL: one Catalog upload persists all 1,000 mapped source rows with stable identities and no Inventory receipt", { skip: !databaseUrl }, async (t) => {
+  const shop = `catalog-capacity-${crypto.randomUUID()}.myshopify.com`;
+  const { prisma, calls, indexAction, detailAction } = await setup(t, shop);
+  t.after(async () => prisma.catalogImportBatch.deleteMany({ where: { shop } }));
+  const sourceRows = Array.from({ length: 1000 }, (_, index) => {
+    const group = Math.floor(index / 4) + 1;
+    const size = ["S", "M", "L", "XL"][index % 4];
+    return [`Style ${group}`, `CAP-${String(index + 1).padStart(4, "0")}`, `GROUP-${group}`, size, "Blue"].join(",");
+  });
+  const originalCsv = `Product Name,SKU,Product Group Code,Size,Color\n${sourceRows.join("\n")}`;
+  const upload = new FormData();
+  upload.set("file", new File([originalCsv], "catalog-capacity.csv", { type: "text/csv" }));
+  const uploaded = await actionArgs(indexAction, new Request("http://localhost/app/imports/catalog", { method: "POST", body: upload }));
+  assert.equal(uploaded.status, 302);
+  const batchId = decodeURIComponent(uploaded.headers.get("Location").split("/").at(-1));
+  const capacityMapping = { 0: "productName", 1: "sku", 2: "productGroupCode", 3: "size", 4: "color" };
+
+  const mapped = await actionArgs(detailAction, mappingRequest(batchId, "save-mapping", 0, capacityMapping), batchId);
+  assert.equal(mapped.status, 302);
+  const batch = await prisma.catalogImportBatch.findFirstOrThrow({
+    where: { shop, id: batchId },
+    include: { lines: { orderBy: { rowNumber: "asc" } } },
+  });
+  assert.equal(batch.status, "DRAFT");
+  assert.equal(batch.originalCsv, originalCsv, "the complete original source remains available for review/history");
+  assert.equal(batch.lines.length, 1000);
+  assert.equal(batch.lines[0].sourceRowNumber, 2);
+  assert.deepEqual(batch.lines[0].sourceValues, ["Style 1", "CAP-0001", "GROUP-1", "S", "Blue"]);
+  assert.equal(batch.lines[0].productGroupCode, "GROUP-1");
+  assert.equal(batch.lines.at(-1).sourceRowNumber, 1001);
+  assert.deepEqual(batch.lines.at(-1).sourceValues, ["Style 250", "CAP-1000", "GROUP-250", "XL", "Blue"]);
+  assert.equal(batch.lines.filter((line) => line.status === "READY").length, 1000);
+  assert.equal(await prisma.catalogImportLine.count({ where: { shop: `other-${shop}`, batchId } }), 0,
+    "rows stay tenant-scoped even when an ID is known");
+  assert.equal(await prisma.importBatch.count({ where: { shop, id: batchId } }), 0,
+    "Catalog review persists to CatalogImport models and cannot create an Inventory receipt");
+  assert.equal(calls.length, 0, "upload/mapping persistence performs no Shopify GraphQL request");
+});
+
+test("PostgreSQL: Catalog upload retry is idempotent by submissionId and identical shop-scoped checksum", { skip: !databaseUrl }, async (t) => {
+  const shop = `catalog-upload-replay-${crypto.randomUUID()}.myshopify.com`;
+  const { prisma, indexAction } = await setup(t, shop);
+  t.after(async () => prisma.catalogImportBatch.deleteMany({ where: { shop } }));
+  const submissionId = crypto.randomUUID();
+  const content = "Product Name,SKU\nReplay item,REPLAY-1\n";
+  const submit = async ({ id, fileName, csv = content }) => {
+    const form = new FormData();
+    form.set("submissionId", id);
+    form.set("file", new File([csv], fileName, { type: "text/csv" }));
+    return actionArgs(indexAction, new Request("http://localhost/app/imports/catalog", { method: "POST", body: form }));
+  };
+
+  const first = await submit({ id: submissionId, fileName: "supplier-a.csv" });
+  assert.equal(first.status, 302);
+  const firstLocation = first.headers.get("Location");
+  const firstBatchId = decodeURIComponent(firstLocation.split("/").at(-1));
+  const stored = await prisma.catalogImportBatch.findFirstOrThrow({ where: { shop, id: firstBatchId } });
+  assert.equal(stored.submissionId, submissionId, "the durable row must use the caller's stable upload identity");
+
+  const replay = await submit({ id: submissionId, fileName: "supplier-a.csv" });
+  assert.equal(replay.status, 302);
+  assert.equal(replay.headers.get("Location"), firstLocation,
+    "replaying the exact upload request must return the original mapping draft, not create another batch");
+
+  const sameContent = await submit({ id: crypto.randomUUID(), fileName: "renamed-supplier.csv" });
+  if (sameContent.status === 302) {
+    assert.equal(sameContent.headers.get("Location"), firstLocation,
+      "same-shop identical content may resolve to the existing draft, but not a duplicate batch");
+  } else {
+    assert.match(sameContent.error ?? "", /already|duplicate|existing|uploaded/i,
+      "a duplicate checksum response must tell the merchant the source was already uploaded");
+  }
+
+  const conflictingReplay = await submit({
+    id: submissionId,
+    fileName: "supplier-a.csv",
+    csv: "Product Name,SKU\nChanged content,REPLAY-2\n",
+  });
+  assert.notEqual(conflictingReplay.headers?.get("Location"), firstLocation,
+    "a reused idempotency key with different file content must not silently resolve as the original request");
+  assert.equal(await prisma.catalogImportBatch.count({ where: { shop } }), 1,
+    "all retries and checksum duplicates leave exactly one CatalogImportBatch");
+});
+
 test("catalog mapping action rejects duplicate and missing required field mappings without persistence", { skip: !databaseUrl }, async (t) => {
   const shop = `catalog-mapping-guards-${crypto.randomUUID()}.myshopify.com`;
   const { prisma, indexAction, detailAction } = await setup(t, shop);

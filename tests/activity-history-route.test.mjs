@@ -68,7 +68,10 @@ test("Activity logging records preview, merge attempt/result, per-line result an
     "preview and its activity event must be committed together");
   assert.match(route, /eventType:\s*"SHOPIFY_STATE_VERIFIED"/);
   assert.match(route, /outcome:\s*"ATTEMPTED"/);
-  assert.match(route, /eventType:\s*"IMPORT_RESULT"/);
+  assert.match(route, /eventType:\s*isResume\s*\?\s*"IMPORT_RESUME"\s*:\s*"IMPORT_MERGE_CHUNK"/,
+    "Merge and Resume attempts are recorded with distinct operation types");
+  assert.match(route, /eventType:\s*"IMPORT_MERGE_CHUNK_RESULT"/,
+    "each bounded execution chunk persists a result event");
   assert.match(route, /eventType:\s*"IMPORT_LINE_RESULT"/);
   assert.match(schema, /model ActivityLog/);
   assert.match(schema, /@@unique\(\[shop, sourceKey\]\)/);

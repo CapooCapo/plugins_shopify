@@ -4,7 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { randomUUID } from "node:crypto";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { checksumCatalogCsv, validateCatalogUpload } from "../utils/catalog-import.server";
+import { checksumCatalogCsv, persistCatalogUpload, validateCatalogUpload, CatalogSubmissionConflictError } from "../utils/catalog-import.server";
 import { MAX_CSV_BYTES } from "../utils/csv-limits.js";
 import { readRequestBodyLimited } from "../utils/request-body.server";
 
@@ -16,7 +16,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { shop: session.shop }, orderBy: { createdAt: "desc" }, take: 100,
     select: { id: true, fileName: true, status: true, draftVersion: true, createdAt: true, _count: { select: { lines: true } } },
   });
-  return { batches, shop: session.shop };
+  return { batches, shop: session.shop, submissionId: randomUUID() };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -62,29 +62,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const file = form.get("file");
     if (!(file instanceof File) || !file.size) return { error: "Choose a CSV file first." };
     if (file.size > MAX_CSV_BYTES) return { error: `Catalog CSVs are limited to ${MAX_CSV_BYTES.toLocaleString()} bytes.` };
+    const submittedId = String(form.get("submissionId") ?? "").trim();
+    if (submittedId && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(submittedId)) {
+      return { error: "The upload form expired. Reload Catalog Imports and choose the CSV again." };
+    }
+    const submissionId = submittedId || randomUUID();
     const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer());
     const parsed = validateCatalogUpload(file.name, text);
-    const id = randomUUID();
-    await prisma.catalogImportBatch.create({ data: {
-      id, shop: session.shop, submissionId: randomUUID(), fileName: file.name,
-      fileChecksum: checksumCatalogCsv(text), originalCsv: text, sourceHeaders: parsed.headers,
-      status: "MAPPING", draftVersion: 0,
-    } });
-    return redirect(`/app/imports/catalog/${encodeURIComponent(id)}`);
+    const persisted = await persistCatalogUpload({
+      shop: session.shop,
+      submissionId,
+      fileName: file.name,
+      fileChecksum: checksumCatalogCsv(text),
+      originalCsv: text,
+      sourceHeaders: parsed.headers,
+    }, prisma);
+    return redirect(`/app/imports/catalog/${encodeURIComponent(persisted.batchId)}`);
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Unable to save this catalog CSV." };
+    return { error: error instanceof CatalogSubmissionConflictError
+      ? error.message
+      : error instanceof Error ? error.message : "Unable to save this catalog CSV." };
   }
 };
 
 export default function CatalogImports() {
-  const { batches, shop } = useLoaderData<typeof loader>();
+  const { batches, shop, submissionId } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   return <main className="stockhub-import-new stockhub-catalog-imports">
     <header className="stockhub-import-page-header"><div><div className="stockhub-overview-eyebrow">StockHub imports · Product Catalog</div><h1>Catalog CSV drafts</h1><p>Map supplier columns and review catalog data. Drafts are not sent to Shopify.</p></div></header>
     <p><strong>Store:</strong> {shop} · Inventory Update remains a separate workflow.</p>
     <section className="stockhub-panel"><s-section heading="Upload product catalog CSV">
       <p>Required fields: Product Name and SKU. Price is optional in a draft. Quantity is not part of catalog imports.</p>
-      <Form method="post" encType="multipart/form-data"><label htmlFor="catalog-file">CSV file (maximum {MAX_CSV_BYTES.toLocaleString()} bytes)</label><br /><input id="catalog-file" name="file" type="file" accept=".csv,text/csv" required /> <button type="submit">Upload and map columns</button></Form>
+      <Form method="post" encType="multipart/form-data"><input type="hidden" name="submissionId" value={submissionId}/><label htmlFor="catalog-file">CSV file (up to {MAX_CSV_BYTES.toLocaleString()} bytes and 1,000 data rows)</label><br /><input id="catalog-file" name="file" type="file" accept=".csv,text/csv" required /> <button type="submit">Upload and map columns</button></Form>
       {actionData?.error ? <p role="alert">{actionData.error}</p> : null}
     </s-section></section>
     <section className="stockhub-panel"><s-section heading="Recent catalog drafts">

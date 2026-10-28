@@ -156,7 +156,7 @@ test("receipt UI uses accessible operation cards, hides zero-row confirmation, a
     "the confirmation dialog must be gated by a revision-matched eligible state");
   assert.match(source, /batch\.updatedAt\.toISOString\(\)[\s\S]*?line\.id, line\.status, line\.stage, line\.operationType/,
     "an open confirmation revision includes receipt and line state so revalidation invalidates stale confirmation");
-  assert.match(source, /name="intent" value=\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}[\s\S]*?name="batchId" value=\{batch\.id\}[\s\S]*?name="confirmed" value="yes"[\s\S]*?name="confirmedCount" value=\{eligibleCount\}/,
+  assert.match(source, /name="intent" value=\{initialMergeIntent\}[\s\S]*?name="batchId" value=\{batch\.id\}[\s\S]*?name="confirmed" value="yes"[\s\S]*?name="confirmedCount" value=\{eligibleCount\}/,
     "the existing server-side confirmation fields remain intact");
   assert.match(source, /name="partialConfirmed" value="yes"/,
     "the existing explicit partial-confirmation contract remains intact");

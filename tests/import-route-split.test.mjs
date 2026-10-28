@@ -146,7 +146,9 @@ test("FAILED remains Failed, and Verify is explicit, read-only, and routed to it
   const detailLoader = loaderBody(detail);
   assert.doesNotMatch(detailLoader, /verifyImportBatchShopifyState|verifyShopifyState/,
     "opening or refreshing detail must not automatically verify Shopify state");
-  const verifyAction = newImport.slice(newImport.indexOf('if (intent === "verifyShopifyState")'), newImport.indexOf('if (intent === "merge" || intent === "resume")'));
+  const verifyStart = newImport.indexOf('if (intent === "verifyShopifyState")');
+  const verifyEnd = newImport.indexOf('if (["merge", "resume", "continueMerge"', verifyStart);
+  const verifyAction = newImport.slice(verifyStart, verifyEnd);
   assert.match(verifyAction, /verifyImportBatchShopifyState\(/);
   assert.doesNotMatch(verifyAction, /mergeImportBatch\(|\.inventory(?:Activate|Adjust)|mutation\s+StockHub/i,
     "Verify action must remain read-only");
@@ -172,10 +174,12 @@ test("Preview, History filters, Verify, Merge, and Resume submit to the route th
     "History filters submit GET to the History index loader");
   assert.match(detail, /export\s*\{\s*action\s*\}\s*from\s*"\.\/app\.imports\._index"/);
   assert.match(detail, /name="intent"\s+value="verifyShopifyState"/);
-  assert.match(detail, /name="intent"\s+value=\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}/,
-    "receipt mutations submit through the detail route's re-exported action");
-  assert.match(newImport, /return redirect\(`\/app\/imports\/history\/\$\{encodeURIComponent\(batchId\)\}`\)/,
-    "successful merge navigates to the correct selected receipt route");
+  assert.match(detail, /export\s*\{\s*action\s*\}\s*from\s*"\.\/app\.imports\._index"/,
+    "receipt mutations use the same authenticated import action");
+  assert.match(detail, /<mergeFetcher\.Form method="post"[\s\S]*?name="intent"\s+value=\{initialMergeIntent\}/,
+    "explicit Merge/Resume confirmation submits the current intent from the receipt route");
+  assert.match(newImport, /return \{ mergeProgress:\s*\{/,
+    "chunk execution returns persisted progress to the receipt UI without redirecting away");
 });
 
 test("Merge UI scope and blocked-row gates match the action's resumable workflow", async (t) => {
@@ -184,13 +188,11 @@ test("Merge UI scope and blocked-row gates match the action's resumable workflow
     source(newImportRoute),
   ]);
   const mergeDisabled = detail.match(/const mergeDisabled\s*=\s*([^;]+);/)?.[1] ?? "";
-  const mergeAction = newImport.slice(
-    newImport.indexOf('if (intent === "merge" || intent === "resume")'),
-    newImport.indexOf("const attemptId", newImport.indexOf('if (intent === "merge" || intent === "resume")')),
-  );
+  const mergeStart = newImport.indexOf('if (["merge", "resume", "continueMerge"');
+  const mergeAction = newImport.slice(mergeStart, newImport.indexOf("const attemptId = randomUUID()", mergeStart));
 
   await t.test("inventory-only batches do not require write_products", () => {
-    assert.match(mergeAction, /const needsProductWrite\s*=\s*batch\.lines\.some\([\s\S]*?line\.operationType\s*===\s*"CREATE_DRAFT"[\s\S]*?\);[\s\S]*?if\s*\(needsProductWrite\)\s*neededScopes\.add\("write_products"\)/,
+    assert.match(mergeAction, /const needsProductWrite\s*=\s*eligibleLines\.some\([\s\S]*?line\.operationType\s*===\s*"CREATE_DRAFT"[\s\S]*?\);[\s\S]*?if\s*\(needsProductWrite\)\s*neededScopes\.add\("write_products"\)/,
       "the action requires write_products only when eligible CREATE_DRAFT lines need it");
     assert.match(mergeDisabled, /write_products[\s\S]*(?:needsProductWrite|productWriteRequired)|(?:needsProductWrite|productWriteRequired)[\s\S]*write_products/,
       "the UI must not disable an inventory-only batch solely because write_products is absent");
@@ -207,6 +209,8 @@ test("Merge UI scope and blocked-row gates match the action's resumable workflow
     assert.match(mergeAction, /const eligibleLines = batch\.lines\.filter/);
     assert.match(mergeAction, /formData\.get\("partialConfirmed"\) !== "yes"/,
       "the server must require explicit partial-import confirmation when blocked rows exist");
+    assert.match(mergeAction, /confirmedLineIds\s*=\s*eligibleLines\.map/,
+      "blocked rows are excluded from the server-side approved row snapshot");
     assert.doesNotMatch(mergeDisabled, /blocked\s*>\s*0/,
       "eligible rows can be merged while blocked rows remain excluded");
   });

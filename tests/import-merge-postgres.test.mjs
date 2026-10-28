@@ -43,6 +43,41 @@ async function seedBatch(prisma, { shop, batchId, lineId, status = "PREVIEWED", 
   return { operationId, idempotencyKey, t0 };
 }
 
+async function submitConfirmedSnapshot(prisma, { shop, batchId, admin, now, intent = "merge", servicePrisma = prisma }) {
+  const batch = await prisma.importBatch.findFirst({
+    where: { id: batchId, shop },
+    include: { lines: { orderBy: { rowNumber: "asc" } } },
+  });
+  assert.ok(batch, "test fixture must have a persisted receipt before submitting confirmation");
+  const eligible = batch.lines.filter((line) => intent === "merge"
+    ? line.status === "PREVIEWED" && line.stage === "PREPARED" && line.operationType !== "BLOCKED"
+    : !["SUCCEEDED", "BLOCKED"].includes(line.status) && line.operationType !== "BLOCKED");
+  return mergeImportBatch({
+    shop,
+    batchId,
+    admin,
+    prisma: servicePrisma,
+    now,
+    intent,
+    expectedRevision: batch.revision ?? 0,
+    confirmedLineIds: eligible.map((line) => line.id),
+  });
+}
+
+async function continueSavedApproval(prisma, { shop, batchId, admin, now }) {
+  const batch = await prisma.importBatch.findFirst({ where: { id: batchId, shop } });
+  assert.ok(batch?.activeMergeApprovalId, "the receipt must persist its active approval before continuation");
+  return mergeImportBatch({
+    shop,
+    batchId,
+    admin,
+    prisma,
+    now,
+    intent: "continue",
+    approvalId: batch.activeMergeApprovalId,
+  });
+}
+
 function jsonResponse(data) {
   return new Response(JSON.stringify({ data }), {
     status: 200,
@@ -67,7 +102,7 @@ function draftProduct(operationId, n = 300) {
   };
 }
 
-test("PostgreSQL: stale Merge worker cannot repeat product creation or inventory activation after another worker finishes", { skip: !process.env.STOCKHUB_TEST_DATABASE_URL }, async (t) => {
+test("PostgreSQL: stale pre-create Shopify lookup cannot advance a worker after lease invalidation", { skip: !process.env.STOCKHUB_TEST_DATABASE_URL }, async (t) => {
   const prisma = await isolatedPrisma(t);
   await prisma.importBatch.deleteMany({ where: { shop: "race-test.myshopify.com" } });
   const t0 = new Date("2026-10-24T10:00:00.000Z");
@@ -187,18 +222,20 @@ test("PostgreSQL: stale Merge worker cannot repeat product creation or inventory
     },
   };
 
-  const workerA = mergeImportBatch({ shop, batchId, admin, prisma, now });
+  const workerA = submitConfirmedSnapshot(prisma, { shop, batchId, admin, now, intent: "merge" });
   await workerAFirstSkuLookupStarted;
 
   currentTime = new Date(t0.getTime() + 16 * 60 * 1000);
-  const workerB = await mergeImportBatch({ shop, batchId, admin, prisma, now });
-  assert.equal(workerB.status, "COMPLETED");
-  assert.equal((await prisma.importLine.findUniqueOrThrow({ where: { id: lineId } })).status, "SUCCEEDED");
-  assert.equal(createdProducts.length, 1);
-  assert.equal(activatedInventoryItems.length, 1);
+  await assert.rejects(
+    continueSavedApproval(prisma, { shop, batchId, admin, now }),
+    (error) => error.code === "RESUME_REQUIRED",
+    "automatic continuation stops when the worker lease expires, even while a Shopify read may still be pending",
+  );
+  assert.equal(createdProducts.length, 0);
+  assert.equal(activatedInventoryItems.length, 0);
 
-  // Worker A's first lookup began before B's writes and returns that stale
-  // empty result only after B has completed and the lease has been stolen.
+  // Worker A's first lookup returns after the lease is invalidated; its stale
+  // worker cannot progress into a productCreate mutation.
   releaseWorkerAFirstSkuLookup(jsonResponse({ productVariants: {
     edges: [], pageInfo: { hasNextPage: false, endCursor: null },
   } }));
@@ -206,12 +243,16 @@ test("PostgreSQL: stale Merge worker cannot repeat product creation or inventory
 
   assert.deepEqual(
     [createdProducts.length, activatedInventoryItems.length],
-    [1, 1],
-    "a stale worker must not create a duplicate Shopify Draft or repeat inventory activation",
+    [0, 0],
+    "a stale worker must not dispatch product creation or inventory activation after losing its lease",
   );
   const finalLine = await prisma.importLine.findUniqueOrThrow({ where: { id: lineId } });
-  assert.equal(finalLine.status, "SUCCEEDED", "stale worker must not overwrite the completed line");
-  assert.equal(finalLine.stage, "COMPLETED");
+  assert.equal(finalLine.status, "PREVIEWED", "no Shopify mutation stage had begun when the lookup was paused");
+  assert.equal(finalLine.stage, "PREPARED");
+  const finalBatch = await prisma.importBatch.findUniqueOrThrow({ where: { id: batchId } });
+  assert.equal(finalBatch.status, "UNCERTAIN", "the stale receipt is held for explicit merchant recovery");
+  const approval = await prisma.importMergeApproval.findFirstOrThrow({ where: { batchId, shop } });
+  assert.equal(approval.status, "STOPPED");
 });
 
 test("PostgreSQL: concurrent lease claims have one winner and stale line CAS updates affect zero rows", { skip: !process.env.STOCKHUB_TEST_DATABASE_URL }, async (t) => {
@@ -301,10 +342,10 @@ test("PostgreSQL: simultaneous Merge service requests admit one active worker", 
     throw new Error(`Unexpected GraphQL operation: ${operationName}`);
   } };
   const now = () => new Date(t0.getTime() + 1000);
-  const workerA = mergeImportBatch({ shop, batchId, admin, prisma, now });
+  const workerA = submitConfirmedSnapshot(prisma, { shop, batchId, admin, now, intent: "merge" });
   await locationStarted;
   await assert.rejects(
-    mergeImportBatch({ shop, batchId, admin, prisma, now }),
+    submitConfirmedSnapshot(prisma, { shop, batchId, admin, now, intent: "merge" }),
     (error) => error.code === "BATCH_ALREADY_RUNNING",
   );
   assert.equal(locationCalls, 1);
@@ -313,6 +354,110 @@ test("PostgreSQL: simultaneous Merge service requests admit one active worker", 
   assert.equal(result.status, "COMPLETED");
   assert.equal(inventoryMutations, 1);
   assert.equal((await prisma.importBatch.findUniqueOrThrow({ where: { id: batchId } })).status, "COMPLETED");
+});
+
+test("PostgreSQL: one 51-row confirmation persists a tenant-scoped approval snapshot and bounded progress across reload-style continuations", { skip: !process.env.STOCKHUB_TEST_DATABASE_URL }, async (t) => {
+  const prisma = await isolatedPrisma(t);
+  const shop = `pg-approved-chunks-${crypto.randomUUID()}.myshopify.com`;
+  const batchId = `approved-chunks-${crypto.randomUUID()}`;
+  const t0 = new Date("2026-10-28T10:00:00.000Z");
+  const lineIds = Array.from({ length: 51 }, (_, index) => `approved-line-${crypto.randomUUID()}-${index}`);
+  const skuById = new Map(lineIds.map((id, index) => [id, `APPROVED-${String(index + 1).padStart(3, "0")}`]));
+  t.after(async () => prisma.importBatch.deleteMany({ where: { shop } }));
+
+  await prisma.importBatch.create({ data: {
+    id: batchId,
+    shop,
+    submissionId: crypto.randomUUID(),
+    receiptCode: `IMP-${crypto.randomUUID()}`,
+    fileChecksum: `checksum-${crypto.randomUUID()}`,
+    fileName: "approved-51.csv",
+    locationId: "gid://shopify/Location/10",
+    locationName: "Main warehouse",
+    currencyCode: "USD",
+    status: "PREVIEWED",
+    revision: 0,
+    createdAt: t0,
+    updatedAt: t0,
+    lines: { create: lineIds.map((id, index) => ({
+      id,
+      rowNumber: index + 2,
+      sku: skuById.get(id),
+      title: `Approved item ${index + 1}`,
+      description: "PostgreSQL approval snapshot test",
+      price: "10.00",
+      quantity: 2,
+      operationType: "ADJUST",
+      status: "PREVIEWED",
+      stage: "PREPARED",
+      operationId: `operation-${id}`,
+      idempotencyKey: `key-${id}`,
+      productId: "gid://shopify/Product/30",
+      variantId: "gid://shopify/ProductVariant/20",
+      inventoryItemId: "gid://shopify/InventoryItem/40",
+      expectedQuantity: 11,
+      createdAt: t0,
+      updatedAt: t0,
+    })) },
+  } });
+
+  const calls = [];
+  const admin = { async graphql(query, { variables } = {}) {
+    const operationName = query.match(/(?:query|mutation)\s+(\w+)/)?.[1];
+    calls.push({ operationName, variables });
+    if (operationName === "StockHubValidateLocation") return locationResponse();
+    if (operationName === "StockHubRecheckSku") {
+      const sku = variables.query.match(/sku:\\?"([^"]+)/)?.[1];
+      return jsonResponse({ productVariants: { edges: [{ node: {
+        id: "gid://shopify/ProductVariant/20",
+        sku,
+        title: "Default",
+        product: { id: "gid://shopify/Product/30", title: "Existing", status: "ACTIVE" },
+        inventoryItem: { id: "gid://shopify/InventoryItem/40", tracked: true,
+          inventoryLevel: { quantities: [{ name: "available", quantity: 11 }] } },
+      } }], pageInfo: { hasNextPage: false, endCursor: null } } });
+    }
+    if (operationName === "StockHubAdjustIncoming") return jsonResponse({ inventoryAdjustQuantities: {
+      inventoryAdjustmentGroup: { id: "gid://shopify/InventoryAdjustmentGroup/1" }, userErrors: [],
+    } });
+    throw new Error(`Unexpected GraphQL operation: ${operationName}`);
+  } };
+  const now = () => new Date(t0.getTime() + 1000);
+  const first = await mergeImportBatch({
+    shop, batchId, admin, prisma, now,
+    intent: "merge", expectedRevision: 0, confirmedLineIds: lineIds,
+  });
+
+  assert.equal(first.approvalStatus, "ACTIVE");
+  assert.equal(first.continueRequired, true);
+  assert.equal(first.chunkNumber, 1);
+  assert.equal(first.lines.filter((line) => line.status === "SUCCEEDED").length, 50);
+  assert.equal(first.lines.filter((line) => line.status === "PREVIEWED").length, 1);
+  const approval = await prisma.importMergeApproval.findFirst({ where: { id: first.approvalId, shop, batchId } });
+  assert.ok(approval, "the confirmation identity and approved row set must survive outside the request");
+  assert.equal(approval.status, "ACTIVE");
+  assert.equal(approval.processedCount, 50);
+  assert.equal(approval.chunkNumber, 1);
+  assert.deepEqual(JSON.parse(approval.snapshotJson).lines.map((line) => line.id), lineIds);
+  assert.equal(await prisma.importMergeApproval.findFirst({
+    where: { id: first.approvalId, shop: `other-${shop}`, batchId },
+  }), null, "another shop cannot load the approval even when it knows the receipt and approval IDs");
+
+  // This simulates the page being reloaded: only the durable approval identity
+  // is sent back; no count or line list is supplied on the next request.
+  const continued = await mergeImportBatch({
+    shop, batchId, admin, prisma, now,
+    intent: "continue", approvalId: first.approvalId,
+  });
+  assert.equal(continued.approvalStatus, "COMPLETED");
+  assert.equal(continued.continueRequired, false);
+  assert.equal(continued.chunkNumber, 2);
+  assert.ok(continued.lines.every((line) => line.status === "SUCCEEDED"));
+  const finalApproval = await prisma.importMergeApproval.findFirst({ where: { id: first.approvalId, shop, batchId } });
+  assert.equal(finalApproval.status, "COMPLETED");
+  assert.equal(finalApproval.processedCount, 51);
+  assert.equal(finalApproval.chunkNumber, 2);
+  assert.equal(calls.filter((call) => call.operationName === "StockHubAdjustIncoming").length, 51);
 });
 
 test("PostgreSQL: inventory timeout followed by Resume reuses persisted Shopify idempotency key", { skip: !process.env.STOCKHUB_TEST_DATABASE_URL }, async (t) => {
@@ -348,12 +493,12 @@ test("PostgreSQL: inventory timeout followed by Resume reuses persisted Shopify 
     }
     throw new Error(`Unexpected GraphQL operation: ${operationName}`);
   } };
-  const first = await mergeImportBatch({ shop, batchId, admin, prisma, now: () => new Date(t0.getTime() + 1000) });
+  const first = await submitConfirmedSnapshot(prisma, { shop, batchId, admin, now: () => new Date(t0.getTime() + 1000), intent: "merge" });
   assert.equal(first.status, "UNCERTAIN");
   let line = await prisma.importLine.findUniqueOrThrow({ where: { id: lineId } });
   assert.equal(line.status, "UNCERTAIN");
   assert.equal(line.idempotencyKey, idempotencyKey);
-  const second = await mergeImportBatch({ shop, batchId, admin, prisma, now: () => new Date(t0.getTime() + 2000) });
+  const second = await submitConfirmedSnapshot(prisma, { shop, batchId, admin, now: () => new Date(t0.getTime() + 2000), intent: "resume" });
   const attempts = calls.filter((call) => call.operationName === "StockHubAdjustIncoming");
   assert.equal(second.status, "COMPLETED");
   assert.deepEqual(attempts.map((call) => call.variables.key), [idempotencyKey, idempotencyKey]);
@@ -402,10 +547,10 @@ test("PostgreSQL: lost productCreate response reconciles the operation marker on
     throw new Error(`Unexpected GraphQL operation: ${operationName}`);
   } };
   const now = () => new Date(t0.getTime() + 1000);
-  const first = await mergeImportBatch({ shop, batchId, admin, prisma, now });
+  const first = await submitConfirmedSnapshot(prisma, { shop, batchId, admin, now, intent: "merge" });
   assert.equal(first.status, "UNCERTAIN");
   assert.equal((await prisma.importLine.findUniqueOrThrow({ where: { id: lineId } })).stage, "PRODUCT_CREATING");
-  const second = await mergeImportBatch({ shop, batchId, admin, prisma, now });
+  const second = await submitConfirmedSnapshot(prisma, { shop, batchId, admin, now, intent: "resume" });
   assert.equal(second.status, "COMPLETED");
   assert.equal(calls.filter((call) => call.operationName === "StockHubCreateDraft").length, 1);
   assert.equal(calls.filter((call) => call.operationName === "StockHubFindDraftMarker").length, 1);
@@ -415,7 +560,7 @@ test("PostgreSQL: lost productCreate response reconciles the operation marker on
   assert.equal(line.productId, "gid://shopify/Product/300");
 });
 
-test("PostgreSQL: takeover during an in-flight productCreate cannot let the stale worker overwrite the winner", { skip: !process.env.STOCKHUB_TEST_DATABASE_URL }, async (t) => {
+test("PostgreSQL: takeover during productCreate requires explicit marker reconciliation before retry", { skip: !process.env.STOCKHUB_TEST_DATABASE_URL }, async (t) => {
   const prisma = await isolatedPrisma(t);
   const shop = "pg-create-inflight.myshopify.com";
   const batchId = "pg-create-inflight-batch";
@@ -468,11 +613,14 @@ test("PostgreSQL: takeover during an in-flight productCreate cannot let the stal
     }
     throw new Error(`Unexpected GraphQL operation: ${operationName}`);
   } };
-  const workerA = mergeImportBatch({ shop, batchId, admin, prisma, now });
+  const workerA = submitConfirmedSnapshot(prisma, { shop, batchId, admin, now, intent: "merge" });
   await firstCreateStarted;
   currentTime = new Date(t0.getTime() + 16 * 60 * 1000);
-  const workerB = await mergeImportBatch({ shop, batchId, admin, prisma, now });
-  assert.equal(workerB.status, "UNCERTAIN", "takeover sees no marker yet and must not blindly repeat PRODUCT_CREATING");
+  await assert.rejects(
+    continueSavedApproval(prisma, { shop, batchId, admin, now }),
+    (error) => error.code === "RESUME_REQUIRED",
+    "automatic continuation must stop when the saved line is still RUNNING after lease expiry",
+  );
   assert.equal(acceptedProducts, 0);
   const lateProduct = draftProduct(operationId);
   productsByHandle.set(`stockhub-${operationId}`, lateProduct);
@@ -481,9 +629,9 @@ test("PostgreSQL: takeover during an in-flight productCreate cannot let the stal
   await workerA;
   assert.equal(createRequests, 1);
   assert.equal(acceptedProducts, 1, "the already-sent request may still be accepted after lease loss");
-  assert.equal((await prisma.importLine.findUniqueOrThrow({ where: { id: lineId } })).status, "UNCERTAIN");
+  assert.equal((await prisma.importLine.findUniqueOrThrow({ where: { id: lineId } })).status, "RUNNING");
   currentTime = new Date(t0.getTime() + 17 * 60 * 1000);
-  const resumed = await mergeImportBatch({ shop, batchId, admin, prisma, now });
+  const resumed = await submitConfirmedSnapshot(prisma, { shop, batchId, admin, now, intent: "resume" });
   assert.equal(resumed.status, "COMPLETED", "Resume must reconcile the late product by its marker");
   assert.equal(createRequests, 1, "Resume must not send another productCreate");
   assert.equal(activationRequests, 1);
@@ -554,7 +702,7 @@ test("PostgreSQL: takeover immediately before inventoryActivate prevents the sta
       });
     },
   });
-  await mergeImportBatch({ shop, batchId, admin, prisma: guardedPrisma, now: () => new Date(currentTime) });
+  await submitConfirmedSnapshot(prisma, { shop, batchId, admin, servicePrisma: guardedPrisma, now: () => new Date(currentTime), intent: "resume" });
   assert.equal(tookOver, true);
   assert.equal(activationRequests, 0, "the worker must renew/verify ownership before sending inventoryActivate");
   const batch = await prisma.importBatch.findUniqueOrThrow({ where: { id: batchId } });
@@ -604,14 +752,19 @@ test("PostgreSQL: takeover after Shopify inventory success but before line persi
     }
     throw new Error(`Unexpected GraphQL operation: ${operationName}`);
   } };
-  const first = await mergeImportBatch({ shop, batchId, admin, prisma, now: () => new Date(currentTime) });
+  const first = await submitConfirmedSnapshot(prisma, { shop, batchId, admin, now: () => new Date(currentTime), intent: "merge" });
   assert.equal(first.status, "RUNNING");
   let line = await prisma.importLine.findUniqueOrThrow({ where: { id: lineId } });
   assert.equal(line.status, "RUNNING");
   assert.equal(line.stage, "INVENTORY_ADJUSTING");
   assert.equal(line.idempotencyKey, idempotencyKey);
   currentTime = new Date(t0.getTime() + 32 * 60 * 1000);
-  const resumed = await mergeImportBatch({ shop, batchId, admin, prisma, now: () => new Date(currentTime) });
+  await assert.rejects(
+    continueSavedApproval(prisma, { shop, batchId, admin, now: () => new Date(currentTime) }),
+    (error) => error.code === "RESUME_REQUIRED",
+    "a worker takeover cannot blindly continue a chunk whose persisted row is still RUNNING",
+  );
+  const resumed = await submitConfirmedSnapshot(prisma, { shop, batchId, admin, now: () => new Date(currentTime), intent: "resume" });
   assert.equal(resumed.status, "COMPLETED");
   assert.deepEqual(adjustmentKeys, [idempotencyKey, idempotencyKey]);
   assert.equal(effects, 1, "the mocked Shopify idempotency contract collapses retry of the accepted operation");
@@ -620,7 +773,7 @@ test("PostgreSQL: takeover after Shopify inventory success but before line persi
   assert.equal(line.idempotencyKey, idempotencyKey);
 });
 
-test("PostgreSQL: Resume worker loses its lease during lookup and sends no stale inventory adjustment", { skip: !process.env.STOCKHUB_TEST_DATABASE_URL }, async (t) => {
+test("PostgreSQL: expired Resume lookup lease fails closed, then explicit Resume sends one adjustment", { skip: !process.env.STOCKHUB_TEST_DATABASE_URL }, async (t) => {
   const prisma = await isolatedPrisma(t);
   const shop = "pg-resume-race.myshopify.com";
   const batchId = "pg-resume-race-batch";
@@ -664,11 +817,15 @@ test("PostgreSQL: Resume worker loses its lease during lookup and sends no stale
     }
     throw new Error(`Unexpected GraphQL operation: ${operationName}`);
   } };
-  const workerA = mergeImportBatch({ shop, batchId, admin, prisma, now: () => new Date(currentTime) });
+  const workerA = submitConfirmedSnapshot(prisma, { shop, batchId, admin, now: () => new Date(currentTime), intent: "resume" });
   await lookupStarted;
   currentTime = new Date(t0.getTime() + 16 * 60 * 1000);
-  const workerB = await mergeImportBatch({ shop, batchId, admin, prisma, now: () => new Date(currentTime) });
-  assert.equal(workerB.status, "COMPLETED", JSON.stringify(workerB.lines[0]));
+  await assert.rejects(
+    continueSavedApproval(prisma, { shop, batchId, admin, now: () => new Date(currentTime) }),
+    (error) => error.code === "RESUME_REQUIRED",
+    "expired leases require explicit Resume even if the stale worker was only reading Shopify",
+  );
+  assert.equal(adjustmentCalls, 0);
   releaseFirstLookup(jsonResponse({ productVariants: {
     edges: [{
       id: "gid://shopify/ProductVariant/20", sku: `SKU-${lineId}`,
@@ -679,6 +836,8 @@ test("PostgreSQL: Resume worker loses its lease during lookup and sends no stale
     pageInfo: { hasNextPage: false, endCursor: null },
   } }));
   await workerA;
+  const resumed = await submitConfirmedSnapshot(prisma, { shop, batchId, admin, now: () => new Date(currentTime), intent: "resume" });
+  assert.equal(resumed.status, "COMPLETED");
   assert.equal(adjustmentCalls, 1);
   assert.equal((await prisma.importBatch.findUniqueOrThrow({ where: { id: batchId } })).status, "COMPLETED");
   assert.equal((await prisma.importLine.findUniqueOrThrow({ where: { id: lineId } })).status, "SUCCEEDED");
