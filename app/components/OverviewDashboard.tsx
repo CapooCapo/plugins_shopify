@@ -48,6 +48,10 @@ function numberLabel(value: number) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 }
 
+function inventorySkuCountLabel(value: number, partial: boolean) {
+  return `${partial ? "Observed " : ""}${numberLabel(value)}`;
+}
+
 function currencyLabel(value: number | null, currencyCode: string | null) {
   if (value === null || !currencyCode) return "Unavailable";
   return formatStockhubMoney(value, currencyCode);
@@ -175,7 +179,7 @@ export function OverviewDashboard({ data, error, imports, analytics: loadedAnaly
         </article>
         <article className="stockhub-overview-metric stockhub-overview-metric--low-stock">
           <span className="stockhub-metric-label">Low-stock SKUs</span>
-          <strong className="stockhub-metric-value">{inventory ? `${analytics.inventory.status === "partial" ? "At least " : ""}${numberLabel(inventory.lowStockSkuCount)}` : "—"}</strong>
+          <strong className="stockhub-metric-value">{inventory ? inventorySkuCountLabel(inventory.lowStockSkuCount, analytics.inventory.status === "partial") : "—"}</strong>
           <span className="stockhub-metric-note">At or below 5 available units across active locations</span>
         </article>
       </div>
@@ -190,9 +194,10 @@ export function OverviewDashboard({ data, error, imports, analytics: loadedAnaly
           {!inventory ? <div className="stockhub-analytics-empty">{analytics.inventory.message ?? "Inventory health is unavailable."}</div>
             : <>
               <div className="stockhub-inventory-summary">
-                <div><span>Low stock</span><strong>{analytics.inventory.status === "partial" ? "At least " : ""}{numberLabel(inventory.lowStockSkuCount)} SKUs</strong></div>
-                <div><span>Out of stock</span><strong>{analytics.inventory.status === "partial" ? "At least " : ""}{numberLabel(inventory.outOfStockSkuCount)} SKUs</strong></div>
+                <div><span>Low stock</span><strong>{inventorySkuCountLabel(inventory.lowStockSkuCount, analytics.inventory.status === "partial")} SKUs</strong></div>
+                <div><span>Out of stock</span><strong>{inventorySkuCountLabel(inventory.outOfStockSkuCount, analytics.inventory.status === "partial")} SKUs</strong></div>
               </div>
+              {analytics.inventory.status === "partial" ? <p className="stockhub-overview-metric-note">Partial catalog coverage: observed SKU counts may change when more variants are loaded.</p> : null}
               <p className="stockhub-overview-metric-note">Threshold: ≤ {inventory.threshold} available units. Untracked: {numberLabel(inventory.untrackedCount)} variants · Unknown: {numberLabel(inventory.unknownCount)} variants.</p>
               {inventory.outOfStockVariants.length ? <div className="stockhub-overview-inventory-list-group">
                 <h3>Out of stock · restock priority</h3>
