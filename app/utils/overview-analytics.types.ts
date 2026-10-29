@@ -84,11 +84,14 @@ export type SalesAggregation = {
 export type InventoryVariantInput = {
   id: string;
   title: string;
+  selectedOptions?: Array<{ name: string; value: string }>;
+  inventoryItemId?: string | null;
   createdAt?: string | null;
   sku?: string | null;
   product: {
     id: string;
     title: string;
+    productType?: string | null;
     legacyResourceId?: string | number | null;
     imageUrl?: string | null;
     giftCard?: boolean;
@@ -116,9 +119,14 @@ export type InventoryVariantSummary = {
 export type RestockInventoryVariant = {
   id: string;
   title: string;
+  selectedOptions?: Array<{ name: string; value: string }>;
+  inventoryItemId?: string | null;
   sku: string | null;
   createdAt: string | null;
+  productType?: string | null;
   product: { id: string; title: string; legacyResourceId?: string; imageUrl?: string };
+  tracked?: boolean | null;
+  complete?: boolean;
   inventoryStatus: "known" | "unknown" | "untracked" | "non_physical";
   available: number | null;
 };

@@ -35,7 +35,7 @@ export default function App() {
         <a href="/app/stores">Stores</a>
         <a href="/app/products">Products</a>
         <a href="/app/imports">Imports</a>
-        <a href="/app/restock">Restock Planner</a>
+        <a href="/app/inventory-alerts">Inventory Alerts</a>
       </NavMenu>
       {navigation.state === "loading" ? (
         <div role="status" aria-live="polite">

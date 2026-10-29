@@ -1,0 +1,317 @@
+.stockhub-inventory-alerts {
+  display: grid;
+  gap: 22px;
+  color: #1c2734;
+}
+
+.stockhub-alerts-header,
+.stockhub-alerts-results-heading,
+.stockhub-alerts-header-actions,
+.stockhub-alerts-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.stockhub-alerts-header h1 {
+  margin: 3px 0 8px;
+  color: #17212b;
+  font-size: clamp(1.8rem, 3vw, 2.3rem);
+  letter-spacing: -.035em;
+}
+
+.stockhub-alerts-header p,
+.stockhub-alerts-results-heading p,
+.stockhub-alerts-empty p {
+  margin: 0;
+  color: #637182;
+  line-height: 1.55;
+}
+
+.stockhub-alerts-eyebrow {
+  color: #687889 !important;
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .13em;
+}
+
+.stockhub-alerts-header-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.stockhub-alert-button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 13px;
+  border: 1px solid #c8d2dc;
+  border-radius: 9px;
+  background: #fff;
+  color: #283849;
+  font: inherit;
+  font-size: .9rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.stockhub-alert-button:hover:not(:disabled) {
+  border-color: #7890a5;
+  background: #f7fafc;
+}
+
+.stockhub-alert-button--primary {
+  border-color: #254c67;
+  background: #254c67;
+  color: #fff;
+}
+
+.stockhub-alert-button--primary:hover:not(:disabled) {
+  border-color: #18394f;
+  background: #18394f;
+}
+
+.stockhub-alert-button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.stockhub-alerts-loading {
+  padding: 11px 14px;
+  border-radius: 9px;
+  background: #eff6fb;
+  color: #285271;
+}
+
+.stockhub-alerts-context {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 13px;
+  border: 1px solid #dce3e9;
+  border-radius: 10px;
+  background: #fff;
+  color: #627182;
+  font-size: .82rem;
+}
+
+.stockhub-alerts-context span:first-child {
+  color: #334b5f;
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .09em;
+}
+
+.stockhub-alerts-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stockhub-alerts-summary article {
+  display: grid;
+  gap: 7px;
+  min-height: 94px;
+  padding: 17px 18px;
+  border: 1px solid #dce3e9;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.stockhub-alerts-summary strong {
+  color: #1c2734;
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+.stockhub-alerts-summary span {
+  color: #667586;
+  font-size: .84rem;
+}
+
+.stockhub-alerts-summary .is-out { border-top: 3px solid #be5148; }
+.stockhub-alerts-summary .is-low { border-top: 3px solid #d08a28; }
+.stockhub-alerts-summary .is-in { border-top: 3px solid #3d8967; }
+.stockhub-alerts-summary .is-review { border-top: 3px solid #74879a; }
+
+.stockhub-alerts-results {
+  display: grid;
+  gap: 17px;
+  padding: 20px;
+  border: 1px solid #dce3e9;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 5px 20px rgb(29 49 67 / 4%);
+}
+
+.stockhub-alerts-results-heading h2 {
+  margin: 0 0 5px;
+  color: #1d2a37;
+  font-size: 1.25rem;
+}
+
+.stockhub-alerts-results-heading p { max-width: 760px; font-size: .88rem; }
+
+.stockhub-alerts-export {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: 5px;
+  text-align: right;
+}
+
+.stockhub-alerts-export p {
+  max-width: 330px;
+  color: #7a4b20;
+  font-size: .76rem;
+}
+
+.stockhub-alerts-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.stockhub-alerts-filters label,
+.stockhub-alerts-pagination label {
+  display: grid;
+  gap: 5px;
+  color: #4d5d6d;
+  font-size: .78rem;
+  font-weight: 700;
+}
+
+.stockhub-alerts-filters input,
+.stockhub-alerts-filters select,
+.stockhub-alerts-pagination select {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5df;
+  border-radius: 8px;
+  background: #fff;
+  color: #283849;
+  font: inherit;
+  font-size: .86rem;
+}
+
+.stockhub-alerts-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid #dce3e9;
+  border-radius: 10px;
+  outline-offset: 2px;
+}
+
+.stockhub-alerts-table {
+  width: 100%;
+  min-width: 1050px;
+  border-collapse: collapse;
+  font-size: .83rem;
+}
+
+.stockhub-alerts-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 11px 12px;
+  background: #f2f6f9;
+  color: #45586a;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.stockhub-alerts-table td {
+  padding: 12px;
+  border-top: 1px solid #e8edf1;
+  color: #384a5a;
+  vertical-align: top;
+}
+
+.stockhub-alerts-table td:first-child strong,
+.stockhub-alerts-table td:first-child span,
+.stockhub-alerts-identities span {
+  display: block;
+}
+
+.stockhub-alerts-table td:first-child span,
+.stockhub-alerts-table td small {
+  margin-top: 4px;
+  color: #758392;
+  font-size: .75rem;
+}
+
+.stockhub-alerts-identities {
+  max-width: 280px;
+  overflow-wrap: anywhere;
+  font-size: .7rem;
+  line-height: 1.45;
+}
+
+.stockhub-alert-status {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #eef1f4;
+  color: #516171;
+  font-size: .72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.stockhub-alert-status--out_of_stock { background: #fff0ee; color: #a53b34; }
+.stockhub-alert-status--low_stock { background: #fff4e4; color: #936017; }
+.stockhub-alert-status--in_stock { background: #eaf6ef; color: #2e704e; }
+.stockhub-alert-status--partial_data { background: #fff5e7; color: #805710; }
+.stockhub-alert-status--unknown,
+.stockhub-alert-status--untracked { background: #eff2f5; color: #5e6e7d; }
+
+.stockhub-alerts-pagination { justify-content: flex-end; color: #637182; font-size: .82rem; }
+.stockhub-alerts-pagination > span { margin-right: auto; }
+.stockhub-alerts-pagination label { grid-template-columns: auto 76px; align-items: center; }
+.stockhub-alerts-pagination select { min-height: 36px; }
+
+.stockhub-alerts-empty {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 24px;
+  border: 1px dashed #c9d4de;
+  border-radius: 10px;
+  background: #f9fbfc;
+}
+
+.stockhub-alerts-empty h3 { margin: 0; color: #293b4b; }
+.stockhub-alerts-footnote { margin: 0; color: #687889; font-size: .8rem; }
+
+@media (max-width: 950px) {
+  .stockhub-alerts-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .stockhub-alerts-header,
+  .stockhub-alerts-results-heading { align-items: stretch; flex-direction: column; }
+  .stockhub-alerts-export { justify-items: start; text-align: left; }
+  .stockhub-alerts-header-actions { justify-content: flex-start; }
+  .stockhub-alerts-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stockhub-alerts-context { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .stockhub-alerts-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stockhub-alerts-filters label:first-child { grid-column: 1 / -1; }
+  .stockhub-alerts-pagination { flex-wrap: wrap; justify-content: flex-start; }
+  .stockhub-alerts-pagination > span { width: 100%; }
+  .stockhub-alerts-results { padding: 14px; }
+}
+
+@media (max-width: 430px) {
+  .stockhub-alerts-summary { gap: 8px; }
+  .stockhub-alerts-summary article { min-height: 82px; padding: 13px; }
+  .stockhub-alerts-filters { grid-template-columns: minmax(0, 1fr); }
+  .stockhub-alerts-filters label:first-child { grid-column: auto; }
+  .stockhub-alerts-header-actions .stockhub-alert-button { flex: 1; }
+}

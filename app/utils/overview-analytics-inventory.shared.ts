@@ -29,14 +29,19 @@ export function aggregateInventoryVariants(
     const identity = {
       id: variant.id,
       title: variant.title,
+      selectedOptions: variant.selectedOptions ?? [],
+      inventoryItemId: variant.inventoryItemId ?? null,
       sku: variant.sku ?? null,
       createdAt: variant.createdAt ?? null,
+      productType: variant.product.productType ?? null,
       product: {
         id: variant.product.id,
         title: variant.product.title,
         ...(resourceId(variant.product.legacyResourceId) ? { legacyResourceId: resourceId(variant.product.legacyResourceId) } : {}),
         ...(variant.product.imageUrl ? { imageUrl: variant.product.imageUrl } : {}),
       },
+      tracked: variant.tracked,
+      complete: variant.levelsComplete === true,
     };
     if (variant.product.giftCard === true) {
       nonPhysicalCount += 1;

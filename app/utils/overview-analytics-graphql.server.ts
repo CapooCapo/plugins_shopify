@@ -61,7 +61,8 @@ export const INVENTORY_VARIANTS_QUERY = `#graphql
         createdAt
         sku
         legacyResourceId
-        product { id title legacyResourceId isGiftCard featuredImage { url } }
+        selectedOptions { name value }
+        product { id title productType legacyResourceId isGiftCard featuredImage { url } }
         inventoryItem {
           id
           createdAt

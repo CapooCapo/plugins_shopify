@@ -127,6 +127,11 @@ export async function readInventoryVariants(
         continue;
       }
       const inventoryItem = record(row.inventoryItem) ? row.inventoryItem : null;
+      const selectedOptions = Array.isArray(row.selectedOptions)
+        ? row.selectedOptions.filter((option): option is Record<string, unknown> => record(option)
+          && typeof option.name === "string" && typeof option.value === "string")
+          .map((option) => ({ name: option.name as string, value: option.value as string }))
+        : [];
       let levels: Array<{ isActive: boolean; available: number | null }> = [];
       let levelsComplete = false;
       if (inventoryItem) {
@@ -144,11 +149,14 @@ export async function readInventoryVariants(
       variants.push({
         id: row.id,
         title: typeof row.title === "string" ? row.title : "Variant",
+        selectedOptions,
+        inventoryItemId: typeof inventoryItem?.id === "string" ? inventoryItem.id : null,
         createdAt: typeof row.createdAt === "string" ? row.createdAt : null,
         sku: typeof row.sku === "string" ? row.sku : null,
         product: {
           id: product.id,
           title: product.title,
+          productType: typeof product.productType === "string" ? product.productType : null,
           giftCard: product.isGiftCard === true,
           legacyResourceId: typeof product.legacyResourceId === "string" || typeof product.legacyResourceId === "number"
             ? product.legacyResourceId : null,
