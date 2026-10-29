@@ -1,6 +1,12 @@
 import type { InventoryAggregation, InventoryVariantSummary, SalesAggregation } from "../../utils/overview-analytics.shared";
+import type { OverviewAnalyticsSection } from "../../utils/overview-analytics.server";
 
 type AttentionItem = InventoryVariantSummary & { salesUnits: number | null; severity: "out" | "low" };
+type AttentionSalesSection = Pick<OverviewAnalyticsSection<SalesAggregation>, "status" | "data">;
+
+export function hasTrustworthyAttentionSales(sales: AttentionSalesSection) {
+  return sales.status === "ready" && sales.data?.demandComplete === true;
+}
 
 export function rankInventoryAttention(inventory: InventoryAggregation, sales: SalesAggregation | null, trustSales: boolean) {
   const demand = new Map((trustSales ? sales?.variantDemand ?? [] : []).map((variant) => [variant.id, variant.units]));

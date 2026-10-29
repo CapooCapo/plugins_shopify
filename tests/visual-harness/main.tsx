@@ -105,7 +105,7 @@ function measure() {
     const element = document.querySelector(selector);
     if (!element) return null;
     const rect = element.getBoundingClientRect();
-    return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
+    return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height), right: Math.round(rect.right), bottom: Math.round(rect.bottom) };
   };
   const cards = [...document.querySelectorAll(".stockhub-overview-metric")].map((element) => {
     const rect = element.getBoundingClientRect();
@@ -131,13 +131,23 @@ function measure() {
       salesNotices: [...document.querySelectorAll(".stockhub-overview-trend .stockhub-analytics-notice")].map((element) => element.textContent?.trim()),
       salesEmptyStates: [...document.querySelectorAll(".stockhub-overview-trend .stockhub-analytics-empty")].map((element) => element.textContent?.trim()),
       salesTrend: box(".stockhub-overview-trend"),
+      chartPlot: box(".stockhub-chart-plot"),
+      salesNotice: document.querySelector(".stockhub-overview-trend .stockhub-analytics-notice")?.textContent?.trim() ?? "",
+      salesEmpty: document.querySelector(".stockhub-overview-trend .stockhub-analytics-empty")?.textContent?.trim() ?? "",
       chartMeasureLabel: document.querySelector(".stockhub-chart-measure-label")?.textContent?.trim() ?? "",
       chartAxisTicks: [...document.querySelectorAll(".stockhub-chart-y-axis span")].map((element) => element.textContent?.trim()),
       chartLineCount: document.querySelectorAll(".stockhub-chart-line").length,
       chartAreaCount: document.querySelectorAll(".stockhub-chart-area").length,
       salesPoints: document.querySelectorAll(".stockhub-chart-point").length,
       inventoryPanel: box(".stockhub-overview-attention"),
-      rankingGrid: box(".stockhub-overview-analysis-grid"),
+      analysisGrid: box(".stockhub-overview-analysis-grid"),
+      analysisGridColumns: getComputedStyle(document.querySelector(".stockhub-overview-analysis-grid")!).gridTemplateColumns,
+      bestSellers: box(".stockhub-overview-best-sellers"),
+      rankingControls: [...document.querySelectorAll(".stockhub-ranking-switch button")].map((element) => ({
+        label: element.textContent?.trim() ?? "",
+        pressed: element.getAttribute("aria-pressed"),
+        visible: element.getBoundingClientRect().width > 0 && getComputedStyle(element).visibility !== "hidden",
+      })),
       topProductTitle: document.querySelector(".stockhub-overview-best-sellers ol > li strong")?.textContent?.trim() ?? "",
       inventoryNotes: [...document.querySelectorAll(".stockhub-overview-attention .stockhub-overview-metric-note")].map((element) => element.textContent?.trim()),
       attentionRows: [...document.querySelectorAll(".stockhub-overview-attention-list > li")].map((element) => element.textContent?.trim() ?? ""),
@@ -148,6 +158,19 @@ function measure() {
       fixtureLabel: document.querySelector(".visual-fixture-badge")?.textContent?.trim() ?? "",
       sampleBadge: document.querySelector(".stockhub-overview-sample-badge")?.textContent?.trim() ?? "",
       historyLink: (() => { const link = document.querySelector(".stockhub-overview-recent .stockhub-overview-section-heading a"); return { href: link?.getAttribute("href"), label: link?.textContent?.trim() }; })(),
+      sectionOrder: [...document.querySelector(".stockhub-overview")!.children].map((element) => {
+        if (element.matches("header.stockhub-overview-header")) return "header";
+        if (element.classList.contains("stockhub-overview-metrics")) return "kpis";
+        if (element.classList.contains("stockhub-overview-analysis-grid")) return "analysis-grid";
+        if (element.classList.contains("stockhub-overview-attention")) return "inventory-attention";
+        if (element.classList.contains("stockhub-overview-recent")) return "recent-imports";
+        return element.tagName.toLowerCase();
+      }),
+      analysisOrder: [...document.querySelector(".stockhub-overview-analysis-grid")!.children].map((element) => {
+        if (element.classList.contains("stockhub-overview-trend")) return "sales-performance";
+        if (element.classList.contains("stockhub-overview-best-sellers")) return "best-sellers";
+        return element.tagName.toLowerCase();
+      }),
     } : null,
     quickActions: box(".stockhub-overview-shortcuts"),
     overviewWorkspace: box(".stockhub-overview-workspace"),

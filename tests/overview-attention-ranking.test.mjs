@@ -100,3 +100,36 @@ test("trusted sales data treats an unlisted attention candidate as zero sold", a
     ["sold-variant", null],
   ], "inventory-only fallback keeps sales unknown and ranks by stock severity");
 });
+
+test("ready sales with incomplete variant identity use inventory-only attention labels and ranking", async () => {
+  const { aggregateSalesOrders } = await vite.ssrLoadModule("/app/utils/overview-analytics.shared.ts");
+  const { hasTrustworthyAttentionSales, rankInventoryAttention } = await vite.ssrLoadModule("/app/components/overview/attention-ranking.ts");
+  const sales = aggregateSalesOrders([{
+    id: "order-incomplete-identity",
+    createdAt: "2026-10-28T12:00:00.000Z",
+    test: false,
+    lineItems: [{
+      id: "line-without-variant",
+      currentQuantity: 5,
+      priceAfterAllDiscountsBeforeTaxesSet: { shopMoney: { amount: "5", currencyCode: "USD" } },
+      product: { id: "product-unknown-variant", title: "Product with missing variant identity" },
+      variant: null,
+    }],
+  }], { currencyCode: "USD", timeZone: "UTC", dates: ["2026-10-28"] });
+  const zeroDemandCandidate = {
+    id: "candidate-absent-from-demand",
+    title: "Candidate absent from demand map",
+    sku: null,
+    product: { id: "product-candidate", title: "Candidate" },
+    available: 0,
+  };
+  const inventory = { outOfStockVariants: [zeroDemandCandidate], lowStockVariants: [] };
+
+  assert.equal(sales.status, "ready", "missing variant identity does not make otherwise complete sales totals partial");
+  assert.equal(sales.demandComplete, false);
+  assert.equal(hasTrustworthyAttentionSales({ status: sales.status, data: sales }), false,
+    "ready status alone must not make incomplete per-variant demand trustworthy");
+  assert.deepEqual(rankInventoryAttention(inventory, sales, false).map(({ id, salesUnits }) => [id, salesUnits]), [
+    ["candidate-absent-from-demand", null],
+  ], "incomplete demand stays unknown rather than being labeled or ranked as zero sales");
+});

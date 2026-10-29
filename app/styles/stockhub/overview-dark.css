@@ -169,7 +169,7 @@ body.stockhub-app-frame:has(.stockhub-overview)::before {
 
 .stockhub-overview-analysis-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2.05fr) minmax(320px, 1fr);
+  grid-template-columns: minmax(0, 2.05fr) minmax(300px, 1fr);
   align-items: stretch;
   gap: 13px;
 }
@@ -202,7 +202,6 @@ body.stockhub-app-frame:has(.stockhub-overview)::before {
 }
 .stockhub-overview .stockhub-chart-y-axis { min-height: 0; height: 100%; color: #59697c; font-size: 9px; }
 .stockhub-overview .stockhub-chart-visual { display: flex; flex-direction: column; }
-.stockhub-overview .stockhub-chart-plot { flex: 1 1 auto; height: 100%; min-height: 190px; overflow: visible; }
 .stockhub-overview .stockhub-chart-gridline { stroke: #e1e7ee; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .stockhub-overview .stockhub-chart-area { opacity: .18; }
 .stockhub-overview .stockhub-chart-area--revenue { fill: #8ab2e8; }
@@ -317,7 +316,6 @@ body.stockhub-app-frame:has(.stockhub-overview)::before {
   .stockhub-overview .stockhub-chart-switch button { min-height: 40px; padding-inline: 10px; }
   .stockhub-overview .stockhub-chart-layout { grid-template-columns: 50px minmax(0, 1fr); gap: 5px; }
   .stockhub-overview .stockhub-chart-y-axis { min-height: 150px; height: auto; font-size: 8px; }
-  .stockhub-overview .stockhub-chart-plot { flex: 0 0 150px; height: 150px; min-height: 150px; }
   .stockhub-overview .stockhub-chart-x-axis { font-size: 8px; }
   .stockhub-overview .stockhub-overview-import-list li { align-items: center; gap: 9px; }
   .stockhub-overview .stockhub-overview-import-primary { flex-basis: 100%; }

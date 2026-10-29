@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 import type { OverviewAnalytics } from "../../utils/overview-analytics.server";
 import { numberLabel } from "./format";
-import { rankInventoryAttention } from "./attention-ranking";
+import { hasTrustworthyAttentionSales, rankInventoryAttention } from "./attention-ranking";
 
 type Props = { analytics: OverviewAnalytics };
 
@@ -13,7 +13,7 @@ function inventoryHref(sku: string | null, productTitle: string) {
 
 export function InventoryAttention({ analytics }: Props) {
   const inventory = analytics.inventory.data;
-  const trustworthySales = analytics.sales.status === "ready" && analytics.sales.data !== null;
+  const trustworthySales = hasTrustworthyAttentionSales(analytics.sales);
   const rows = inventory ? rankInventoryAttention(inventory, analytics.sales.data, trustworthySales) : [];
   const unknownCount = (inventory?.unknownCount ?? 0) + (inventory?.untrackedCount ?? 0);
 

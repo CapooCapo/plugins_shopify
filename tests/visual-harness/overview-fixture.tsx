@@ -26,8 +26,8 @@ function readyAnalytics(range: 7 | 30): OverviewAnalytics {
   const base = createSampleOverviewAnalytics(range, "America/New_York", now);
   return {
     ...base,
-    currencyCode: "USD",
-    sales: { ...base.sales, status: "ready" },
+    currencyCode: "CAD",
+    sales: { ...base.sales, status: "ready", data: { ...base.sales.data!, currencyCode: "CAD" } },
     inventory: { ...base.inventory, status: "ready" },
   };
 }
@@ -38,10 +38,26 @@ export function OverviewFixture() {
   const samplePreview = params.get("sample") === "1";
   const scenario = params.get("scenario");
   const analytics = readyAnalytics(range);
-  if (scenario === "scope-missing") {
+  if (scenario === "scope-missing" || scenario === "blocked") {
     analytics.sales = { status: "permission_required", data: null, message: "Sales analytics require the read_orders permission. No order data was requested.", fetchedAt: null };
-  } else if (scenario === "empty") {
-    analytics.sales = { status: "ready", data: { ...analytics.sales.data!, totals: { revenue: 0, orders: 0, units: 0 }, daily: analytics.sales.data!.daily.map((day) => ({ ...day, revenue: 0, orders: 0, units: 0 })), topProducts: [], topVariants: [] }, fetchedAt: now.toISOString() };
+  } else if (scenario === "empty" || scenario === "ready-empty") {
+    analytics.sales = { status: "ready", data: { ...analytics.sales.data!, totals: { revenue: 0, orders: 0, units: 0 }, daily: analytics.sales.data!.daily.map((day) => ({ ...day, revenue: 0, orders: 0, units: 0 })), topProducts: [], topVariants: [], variantDemand: [] }, fetchedAt: now.toISOString() };
+  } else if (scenario === "partial") {
+    const message = "Only part of the order history was retrieved. Sales totals and rankings reflect the available data and may be incomplete.";
+    const salesData = analytics.sales.data!;
+    analytics.sales = {
+      status: "partial",
+      data: {
+        ...salesData,
+        status: "partial",
+        reason: message,
+        topProducts: salesData.topProducts.slice(0, 3),
+        topVariants: salesData.topVariants.slice(0, 4),
+        variantDemand: salesData.variantDemand.slice(0, 4),
+      },
+      message,
+      fetchedAt: now.toISOString(),
+    };
   }
   return <div className="visual-fixture-shell">
     <aside className="visual-fixture-badge" role="note">LOCAL FIXTURE · NOT LIVE SHOPIFY ADMIN DATA</aside>
