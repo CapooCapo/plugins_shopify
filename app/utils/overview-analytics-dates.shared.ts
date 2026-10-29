@@ -58,3 +58,23 @@ export function computeShopLocalDateWindow(
     dates,
   };
 }
+
+/** A half-open shop-local range containing only the last fully completed days. */
+export function computeCompleteShopLocalDateWindow(
+  now: Date | string,
+  dayCount: 28 | 56,
+  timeZone: string,
+): { startUtc: string; endExclusiveUtc: string; dates: string[] } {
+  const instant = now instanceof Date ? now : new Date(now);
+  if (!Number.isFinite(instant.getTime())) throw new Error("A valid current time is required.");
+  if (dayCount !== 28 && dayCount !== 56) throw new Error("The restock period must be 28 or 56 complete days.");
+
+  const today = datePartsInZone(instant, timeZone);
+  const lastCompleteDate = addCalendarDays(today, -1);
+  const dates = Array.from({ length: dayCount }, (_, index) => addCalendarDays(lastCompleteDate, index - dayCount + 1));
+  return {
+    startUtc: localDateStartUtc(dates[0], timeZone),
+    endExclusiveUtc: localDateStartUtc(today, timeZone),
+    dates,
+  };
+}

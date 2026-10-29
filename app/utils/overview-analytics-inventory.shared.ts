@@ -1,4 +1,4 @@
-import type { InventoryAggregation, InventoryAggregationOptions, InventoryVariantInput, InventoryVariantSummary } from "./overview-analytics.types";
+import type { InventoryAggregation, InventoryAggregationOptions, InventoryVariantInput, InventoryVariantSummary, RestockInventoryVariant } from "./overview-analytics.types";
 
 function resourceId(value: string | number | null | undefined) {
   return value == null ? undefined : String(value);
@@ -12,7 +12,7 @@ function resourceId(value: string | number | null | undefined) {
  */
 export function aggregateInventoryVariants(
   variants: InventoryVariantInput[],
-  options: InventoryAggregationOptions = {},
+  options: InventoryAggregationOptions & { includeRestockVariants?: boolean; catalogComplete?: boolean } = {},
 ): InventoryAggregation {
   const threshold = options.lowStockThreshold ?? 5;
   const lowStockVariants: InventoryVariantSummary[] = [];
@@ -23,15 +23,30 @@ export function aggregateInventoryVariants(
   let totalTrackedKnown = 0;
   const skuAvailability = new Map<string, { available: number; unknown: boolean }>();
   const knownVariantsBySku = new Map<string, InventoryVariantSummary[]>();
+  const restockVariants: RestockInventoryVariant[] = [];
 
   for (const variant of variants) {
+    const identity = {
+      id: variant.id,
+      title: variant.title,
+      sku: variant.sku ?? null,
+      createdAt: variant.createdAt ?? null,
+      product: {
+        id: variant.product.id,
+        title: variant.product.title,
+        ...(resourceId(variant.product.legacyResourceId) ? { legacyResourceId: resourceId(variant.product.legacyResourceId) } : {}),
+        ...(variant.product.imageUrl ? { imageUrl: variant.product.imageUrl } : {}),
+      },
+    };
     if (variant.product.giftCard === true) {
       nonPhysicalCount += 1;
+      if (options.includeRestockVariants) restockVariants.push({ ...identity, inventoryStatus: "non_physical", available: null });
       continue;
     }
     const sku = variant.sku?.trim();
     if (variant.tracked === false) {
       untrackedCount += 1;
+      if (options.includeRestockVariants) restockVariants.push({ ...identity, inventoryStatus: "untracked", available: null });
       if (sku) {
         const current = skuAvailability.get(sku) ?? { available: 0, unknown: false };
         current.unknown = true;
@@ -41,6 +56,7 @@ export function aggregateInventoryVariants(
     }
     if (variant.tracked !== true || variant.levelsComplete === false) {
       unknownCount += 1;
+      if (options.includeRestockVariants) restockVariants.push({ ...identity, inventoryStatus: "unknown", available: null });
       if (sku) {
         const current = skuAvailability.get(sku) ?? { available: 0, unknown: false };
         current.unknown = true;
@@ -51,6 +67,7 @@ export function aggregateInventoryVariants(
     const activeLevels = variant.levels.filter((level) => level.isActive);
     if (!activeLevels.length || activeLevels.some((level) => !Number.isFinite(level.available))) {
       unknownCount += 1;
+      if (options.includeRestockVariants) restockVariants.push({ ...identity, inventoryStatus: "unknown", available: null });
       if (sku) {
         const current = skuAvailability.get(sku) ?? { available: 0, unknown: false };
         current.unknown = true;
@@ -59,6 +76,7 @@ export function aggregateInventoryVariants(
       continue;
     }
     const available = activeLevels.reduce((total, level) => total + (level.available as number), 0);
+    if (options.includeRestockVariants) restockVariants.push({ ...identity, inventoryStatus: "known", available });
     totalTrackedKnown += available;
     if (sku) {
       const current = skuAvailability.get(sku) ?? { available: 0, unknown: false };
@@ -119,5 +137,7 @@ export function aggregateInventoryVariants(
     untrackedCount,
     nonPhysicalCount,
     totalTrackedKnown,
+    ...(options.includeRestockVariants ? { restockVariants } : {}),
+    ...(options.catalogComplete === false ? { catalogComplete: false } : {}),
   };
 }

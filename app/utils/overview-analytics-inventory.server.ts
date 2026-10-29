@@ -79,12 +79,17 @@ async function readAllInventoryLevels(
   return { values: levels, complete: complete && !hasNext, ...(reasons.length ? { reason: [...new Set(reasons)].join(" ") } : {}) };
 }
 
-export async function readInventoryVariants(admin: AdminGraphQL, signal?: AbortSignal): Promise<InventoryAggregation> {
+export async function readInventoryVariants(
+  admin: AdminGraphQL,
+  signal?: AbortSignal,
+  options: { includeRestockVariants?: boolean } = {},
+): Promise<InventoryAggregation> {
   const variants: InventoryVariantInput[] = [];
   let cursor: string | null = null;
   let hasNext = true;
   let pages = 0;
   let partial = false;
+  let catalogComplete = true;
   const partialReasons: string[] = [];
   const seen = new Set<string>();
 
@@ -99,6 +104,7 @@ export async function readInventoryVariants(admin: AdminGraphQL, signal?: AbortS
     } catch {
       if (pages === 0) throw new OverviewAnalyticsReadError("Shopify inventory data could not be loaded. Try again shortly.");
       partial = true;
+      catalogComplete = false;
       partialReasons.push("Some product-variant pages could not be loaded; inventory totals include only the pages already read.");
       break;
     }
@@ -106,6 +112,7 @@ export async function readInventoryVariants(admin: AdminGraphQL, signal?: AbortS
     if (!page) {
       if (pages === 0) throw new OverviewAnalyticsReadError("Shopify returned incomplete inventory data.");
       partial = true;
+      catalogComplete = false;
       partialReasons.push("Shopify returned an incomplete product-variant page; inventory totals include only the pages already read.");
       break;
     }
@@ -115,6 +122,7 @@ export async function readInventoryVariants(admin: AdminGraphQL, signal?: AbortS
       const product = record(row.product) ? row.product : null;
       if (!product || typeof product.id !== "string" || typeof product.title !== "string") {
         partial = true;
+        catalogComplete = false;
         partialReasons.push("Some variants were missing product identity and were excluded from inventory detail.");
         continue;
       }
@@ -136,6 +144,7 @@ export async function readInventoryVariants(admin: AdminGraphQL, signal?: AbortS
       variants.push({
         id: row.id,
         title: typeof row.title === "string" ? row.title : "Variant",
+        createdAt: typeof row.createdAt === "string" ? row.createdAt : null,
         sku: typeof row.sku === "string" ? row.sku : null,
         product: {
           id: product.id,
@@ -153,6 +162,7 @@ export async function readInventoryVariants(admin: AdminGraphQL, signal?: AbortS
     if (page.hasNextPage && (!page.endCursor || page.endCursor === cursor)) {
       hasNext = true;
       partial = true;
+      catalogComplete = false;
       partialReasons.push("Shopify did not advance the product-variant cursor; remaining variants were not read.");
       break;
     }
@@ -162,12 +172,18 @@ export async function readInventoryVariants(admin: AdminGraphQL, signal?: AbortS
   }
   if (hasNext) {
     partial = true;
+    catalogComplete = false;
     if (pages >= MAX_VARIANT_PAGES) {
       partialReasons.push(`Only the first ${MAX_VARIANTS.toLocaleString()} product variants were read because the Overview safety cap was reached. Inventory totals are partial; review the full catalog in Shopify Admin.`);
     } else if (!partialReasons.some((reason) => reason.includes("cursor"))) {
       partialReasons.push("Shopify returned no usable next-variant cursor; remaining variants were not read.");
     }
   }
-  const aggregation = aggregateInventoryVariants(variants, { lowStockThreshold: 5, partial });
+  const aggregation = aggregateInventoryVariants(variants, {
+    lowStockThreshold: 5,
+    partial,
+    includeRestockVariants: options.includeRestockVariants,
+    catalogComplete,
+  });
   return appendPartialReasons(aggregation, partialReasons);
 }

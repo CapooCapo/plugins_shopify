@@ -195,6 +195,8 @@ test("sales aggregation emits zero-filled shop-local daily buckets and marks mix
   ], { currencyCode: "USD", timeZone: "UTC", dates: ["2026-10-27", "2026-10-28", "2026-10-29"] });
 
   assert.equal(result.status, "partial", "orders and unit counts remain available when revenue currency is mixed");
+  assert.equal(result.demandComplete, true,
+    "currency-only gaps do not withhold complete per-variant units from Restock Planner calculations");
   assert.equal(result.currencyMismatch, true);
   assert.equal(typeof result.reason, "string");
   assert.deepEqual(result.totals, { revenue: null, orders: 2, units: 3 },
@@ -237,6 +239,7 @@ test("sales aggregation excludes test orders and treats a missing test flag as i
   });
 
   assert.equal(result.status, "partial", "an order without Shopify's test flag makes the aggregate incomplete");
+  assert.equal(result.demandComplete, false, "missing test-order classification makes sales demand incomplete");
   assert.deepEqual(result.totals, { revenue: 24, orders: 1, units: 2 },
     "test and unknown-test-flag orders are excluded from all aggregate totals");
   assert.deepEqual(result.daily, [{ date: "2026-10-28", revenue: 24, orders: 1, units: 2 }]);

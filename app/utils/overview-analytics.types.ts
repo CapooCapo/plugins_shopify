@@ -33,6 +33,8 @@ export type SalesAggregationOptions = {
   dates: string[];
   /** True when the API adapter could not retrieve all pages. */
   partial?: boolean;
+  /** Include product/variant display identity for Restock Planner rows. */
+  includeVariantDetails?: boolean;
 };
 
 export type SalesRankingProduct = {
@@ -55,11 +57,20 @@ export type SalesRankingVariant = {
   revenue: number | null;
 };
 
-export type SalesVariantDemand = { id: string; units: number };
+export type SalesVariantDemand = {
+  id: string;
+  units: number;
+  productId?: string;
+  productTitle?: string;
+  title?: string;
+  sku?: string;
+};
 
 export type SalesAggregation = {
   status: "ready" | "partial" | "unavailable";
   reason?: string;
+  /** Whether per-variant current-quantity demand was completely observed. */
+  demandComplete: boolean;
   currencyCode: string | null;
   totals: { revenue: number | null; orders: number; units: number };
   daily: Array<{ date: string; revenue: number | null; orders: number; units: number }>;
@@ -73,6 +84,7 @@ export type SalesAggregation = {
 export type InventoryVariantInput = {
   id: string;
   title: string;
+  createdAt?: string | null;
   sku?: string | null;
   product: {
     id: string;
@@ -101,6 +113,16 @@ export type InventoryVariantSummary = {
   variantCount?: number;
 };
 
+export type RestockInventoryVariant = {
+  id: string;
+  title: string;
+  sku: string | null;
+  createdAt: string | null;
+  product: { id: string; title: string; legacyResourceId?: string; imageUrl?: string };
+  inventoryStatus: "known" | "unknown" | "untracked" | "non_physical";
+  available: number | null;
+};
+
 export type InventoryAggregation = {
   status: "ready" | "partial" | "unavailable";
   reason?: string;
@@ -113,4 +135,8 @@ export type InventoryAggregation = {
   untrackedCount: number;
   nonPhysicalCount: number;
   totalTrackedKnown: number;
+  /** Present only when requested by the Restock Planner; Overview stays aggregate-only. */
+  restockVariants?: RestockInventoryVariant[];
+  /** False means Shopify's variant pagination did not cover the full catalog. */
+  catalogComplete?: boolean;
 };

@@ -58,11 +58,13 @@ export const INVENTORY_VARIANTS_QUERY = `#graphql
       nodes {
         id
         title
+        createdAt
         sku
         legacyResourceId
         product { id title legacyResourceId isGiftCard featuredImage { url } }
         inventoryItem {
           id
+          createdAt
           tracked
           inventoryLevels(first: $levelsFirst, includeInactive: false) {
             nodes {

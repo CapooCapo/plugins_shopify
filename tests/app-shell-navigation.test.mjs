@@ -14,6 +14,7 @@ test("Shopify app shell exposes the app home and primary routes in App Bridge na
     ["Stores", "/app/stores"],
     ["Products", "/app/products"],
     ["Imports", "/app/imports"],
+    ["Restock Planner", "/app/restock"],
   ]) {
     assert.match(source, new RegExp(`<a href="${path.replaceAll("/", "\\/")}"(?: rel="home")?>\\s*${label}\\s*<\\/a>`),
       `${label} must have a direct route in the top-level app navigation`);

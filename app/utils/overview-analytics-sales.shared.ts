@@ -2,15 +2,20 @@ import type { SalesAggregation, SalesAggregationOptions, SalesOrder, SalesRankin
 import { datePartsInZone } from "./overview-analytics-dates.shared";
 
 function lineItemsForOrder(order: SalesOrder) {
-  if (Array.isArray(order.lineItems)) return { lines: order.lineItems, hasMore: false };
+  if (Array.isArray(order.lineItems)) return { lines: order.lineItems, hasMore: false, complete: true };
   if (order.lineItems && typeof order.lineItems === "object") {
     const connection = order.lineItems;
+    const lines = Array.isArray(connection.nodes) ? connection.nodes : [];
+    const hasNodes = Array.isArray(connection.nodes);
+    const hasPageInfo = typeof connection.pageInfo?.hasNextPage === "boolean";
+    const hasMore = connection.pageInfo?.hasNextPage === true;
     return {
-      lines: Array.isArray(connection.nodes) ? connection.nodes : [],
-      hasMore: connection.pageInfo?.hasNextPage === true,
+      lines,
+      hasMore,
+      complete: hasNodes && hasPageInfo && !hasMore,
     };
   }
-  return { lines: [], hasMore: false };
+  return { lines: [], hasMore: false, complete: false };
 }
 
 function resourceId(value: string | number | null | undefined) {
@@ -44,11 +49,13 @@ export function aggregateSalesOrders(
   let currencyMismatch = false;
   let revenueIncomplete = false;
   let partial = options.partial === true;
+  let demandComplete = options.partial !== true;
   let missingTestFlag = false;
 
   for (const order of orders) {
     if (typeof order.id !== "string" || !order.id) {
       partial = true;
+      demandComplete = false;
       continue;
     }
     if (seenOrders.has(order.id)) continue;
@@ -57,6 +64,7 @@ export function aggregateSalesOrders(
     const createdAt = order.createdAt ? new Date(order.createdAt) : null;
     if (!createdAt || !Number.isFinite(createdAt.getTime())) {
       partial = true;
+      demandComplete = false;
       continue;
     }
     const date = datePartsInZone(createdAt, options.timeZone);
@@ -64,6 +72,7 @@ export function aggregateSalesOrders(
     if (typeof order.test !== "boolean") {
       partial = true;
       missingTestFlag = true;
+      demandComplete = false;
       continue;
     }
     if (order.test) continue;
@@ -71,12 +80,14 @@ export function aggregateSalesOrders(
     orderCount += 1;
     day.orders += 1;
 
-    const { lines, hasMore } = lineItemsForOrder(order);
-    if (hasMore) partial = true;
+    const { lines, hasMore, complete } = lineItemsForOrder(order);
+    if (!complete) demandComplete = false;
+    if (hasMore) { partial = true; demandComplete = false; }
     const perOrderSeen = new Set<string>();
     for (const line of lines) {
       if (typeof line.id !== "string" || !line.id) {
         partial = true;
+        demandComplete = false;
         continue;
       }
       if (perOrderSeen.has(line.id)) continue;
@@ -86,6 +97,7 @@ export function aggregateSalesOrders(
       seenLines.add(lineKey);
       if (typeof line.currentQuantity !== "number" || !Number.isFinite(line.currentQuantity) || line.currentQuantity < 0) {
         partial = true;
+        demandComplete = false;
         continue;
       }
       const units = line.currentQuantity;
@@ -136,7 +148,11 @@ export function aggregateSalesOrders(
           existingVariant.units += units;
           if (Number.isFinite(numericAmount) && lineCurrency === options.currencyCode) existingVariant.revenue = (existingVariant.revenue ?? 0) + numericAmount;
           variants.set(variant.id, existingVariant);
+        } else {
+          demandComplete = false;
         }
+      } else {
+        demandComplete = false;
       }
     }
   }
@@ -155,10 +171,13 @@ export function aggregateSalesOrders(
   }));
   const variantDemand = [...variants.values()]
     .filter((item) => item.units > 0)
-    .map(({ id, units }) => ({ id, units }));
+    .map(({ id, units, productId, productTitle, title, sku }) => options.includeVariantDetails
+      ? { id, units, productId, productTitle, title, ...(sku ? { sku } : {}) }
+      : { id, units });
 
   return {
     status: partial ? "partial" : "ready",
+    demandComplete,
     ...(currencyMismatch ? { reason: "Revenue is unavailable because Shopify returned mixed shop currencies; order and unit counts remain available without conversion." }
       : revenueIncomplete ? { reason: "Revenue is unavailable because Shopify returned incomplete line-item price data." }
         : missingTestFlag ? { reason: "Some orders lacked Shopify's test-order flag and were excluded from sales totals." }

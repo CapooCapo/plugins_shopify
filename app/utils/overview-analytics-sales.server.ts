@@ -86,6 +86,7 @@ export async function readSalesOrders(
   timeZone: string,
   currencyCode: string,
   signal?: AbortSignal,
+  options: { includeVariantDetails?: boolean } = {},
 ): Promise<SalesAggregation> {
   const search = salesSearch(window.startUtc, window.endExclusiveUtc);
   const orders: SalesOrder[] = [];
@@ -148,6 +149,9 @@ export async function readSalesOrders(
       partialReasons.push("Shopify returned no usable next-order cursor; remaining orders were not read.");
     }
   }
-  const aggregation = aggregateSalesOrders(orders, { currencyCode, timeZone, dates: window.dates, partial });
+  const aggregation = aggregateSalesOrders(orders, {
+    currencyCode, timeZone, dates: window.dates, partial,
+    includeVariantDetails: options.includeVariantDetails,
+  });
   return appendPartialReasons(aggregation, partialReasons);
 }

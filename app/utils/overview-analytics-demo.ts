@@ -203,6 +203,7 @@ export function createSampleSalesSection(
     status: "ready",
     data: {
       status: "ready",
+      demandComplete: true,
       currencyCode: SAMPLE_CURRENCY,
       totals,
       daily,
