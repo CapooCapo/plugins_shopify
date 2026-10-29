@@ -8,8 +8,23 @@ type Props = { data: RestockData; samplePreview: boolean };
 type SortKey = "productTitle" | "unitsSold" | "available" | "suggestedQuantity" | "priority";
 const number = (value: number | null, suffix = "") => value === null ? "—" : `${Number.isInteger(value) ? value : value.toFixed(1)}${suffix}`;
 
-function exportRows(rows: RestockRecommendation[], manualValues: Record<string, string>) {
-  const csv = buildRestockCsv(rows, manualValues);
+function periodEndDate(data: RestockData) {
+  if (!data.periodStartDate || !Number.isInteger(data.analysisDays) || data.analysisDays < 1) return null;
+  const date = new Date(`${data.periodStartDate}T00:00:00.000Z`);
+  if (!Number.isFinite(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + data.analysisDays - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function exportRows(rows: RestockRecommendation[], manualValues: Record<string, string>, data: RestockData, settings: PlanningSettings) {
+  const csv = buildRestockCsv(rows, manualValues, {
+    period: data.period,
+    periodStartDate: data.periodStartDate,
+    periodEndDate: periodEndDate(data),
+    analysisDays: data.analysisDays,
+    timeZone: data.timeZone,
+    settings,
+  });
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -126,7 +141,7 @@ export function RestockPlanner({ data, samplePreview }: Props) {
 
     <section className="stockhub-restock-results" aria-labelledby="restock-results-title">
       <div className="stockhub-restock-results-heading"><div><h2 id="restock-results-title">Restock recommendations</h2><p>System quantities are estimates, not guaranteed demand forecasts. Incoming stock is not deducted.</p></div>
-        <button type="button" className="stockhub-button stockhub-button--primary" onClick={() => exportRows(visibleRows, manualValues)}>Export CSV</button></div>
+        <button type="button" className="stockhub-button stockhub-button--primary" onClick={() => exportRows(visibleRows, manualValues, data, parsedSettings)}>Export visible rows (CSV)</button></div>
       <div className="stockhub-restock-filters">
         <label>Search<input type="search" value={search} onChange={(event) => setSearch(event.currentTarget.value)} placeholder="Product, variant, SKU, or ID" /></label>
         <label>Show<select value={filter} onChange={(event) => setFilter(event.currentTarget.value)}><option value="all">All variants</option><option value="restock">Restock recommended</option><option value="review">Manual review</option><option value="sufficient">Sufficient stock</option></select></label>
@@ -147,7 +162,7 @@ export function RestockPlanner({ data, samplePreview }: Props) {
             <td data-label="Available inventory">{row.available === null ? row.inventoryStatus === "untracked" ? "Untracked" : row.inventoryStatus === "non_physical" ? "Not applicable" : "Unknown / incomplete" : number(row.available)}</td>
             <td data-label="Estimated coverage">{number(row.coverageDays, " days")}</td>
             <td data-label="System-suggested quantity">{row.suggestedQuantity === null ? "Not calculated" : <><strong>{row.suggestedQuantity}</strong><small>System-calculated</small></>}</td>
-            <td data-label="Merchant-entered quantity"><label className="stockhub-restock-manual"><span className="stockhub-visually-hidden">Merchant-entered quantity for {row.productTitle} {row.variantTitle}</span><input type="number" min="0" step="1" value={manualRaw} disabled={row.status === "excluded"} onChange={(event) => setManualValues((current) => ({ ...current, [row.variantId]: event.currentTarget.value }))} placeholder="Override" /></label>{manualRaw && !manualValid ? <small className="stockhub-restock-invalid">Enter a whole number ≥ 0</small> : manualValid ? <small>Merchant-entered</small> : null}</td>
+            <td data-label="Merchant-entered quantity"><label className="stockhub-restock-manual"><span className="stockhub-visually-hidden">Merchant-entered quantity for {row.productTitle} {row.variantTitle}</span><input type="number" min="0" step="1" value={manualRaw} disabled={row.status === "excluded"} onChange={(event) => { const value = event.currentTarget.value; setManualValues((current) => ({ ...current, [row.variantId]: value })); }} placeholder="Override" /></label>{manualRaw && !manualValid ? <small className="stockhub-restock-invalid">Enter a whole number ≥ 0</small> : manualValid ? <small>Merchant-entered</small> : null}</td>
             <td data-label="Priority / status"><span className={`stockhub-restock-status stockhub-restock-status--${row.priority}`}>{statusLabel(row)}</span><details><summary>Why?</summary><p>{row.explanation}</p>{row.qualityIssues.map((issue) => <p key={issue}>{issue}</p>)}</details></td>
           </tr>;
         })}</tbody>

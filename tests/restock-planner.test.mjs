@@ -41,6 +41,31 @@ const context = (overrides = {}) => ({
   ...overrides,
 });
 
+function parseCsvRecords(csv) {
+  const records = [];
+  let record = [];
+  let field = "";
+  let quoted = false;
+  for (let index = 0; index < csv.length; index += 1) {
+    const character = csv[index];
+    if (quoted && character === '"' && csv[index + 1] === '"') {
+      field += '"';
+      index += 1;
+    } else if (character === '"') quoted = !quoted;
+    else if (!quoted && character === ",") {
+      record.push(field);
+      field = "";
+    } else if (!quoted && character === "\n") {
+      record.push(field.replace(/\r$/, ""));
+      records.push(record);
+      record = [];
+      field = "";
+    } else field += character;
+  }
+  if (field || record.length) records.push([...record, field]);
+  return records;
+}
+
 test("Restock windows cover 28 or 56 complete shop-local days including DST-safe UTC boundaries", () => {
   const now = new Date("2026-11-02T17:00:00.000Z");
   const twentyEight = windows.computeCompleteShopLocalDateWindow(now, 28, "America/New_York");
@@ -149,6 +174,70 @@ test("CSV prefixes spreadsheet formulas in Shopify text fields while retaining n
   assert.match(csv, /,"-2",/,
     "numeric negative availability stays numeric rather than receiving the text escape prefix");
   assert.match(csv, /,"5","Merchant-entered",/);
+});
+
+test("CSV round-trip preserves variant identity, excluded rows, status, reason, assumptions and separate planned quantity", () => {
+  const blueId = "gid://shopify/ProductVariant/duplicate-blue";
+  const redId = "gid://shopify/ProductVariant/duplicate-red";
+  const giftCardId = "gid://shopify/ProductVariant/non-physical";
+  const recommendations = calculate.calculateRestockRecommendations([
+    baseRow({ variantId: blueId, sku: "DUPLICATE-SKU", variantTitle: "Blue / M" }),
+    baseRow({ variantId: redId, sku: "DUPLICATE-SKU", variantTitle: "Red / M", unitsSold: 14, available: 7 }),
+    baseRow({ variantId: giftCardId, sku: "GIFT-001", variantTitle: "Gift Card", inventoryStatus: "non_physical", available: null }),
+  ], context());
+  const report = {
+    period: 28,
+    periodStartDate: "2026-10-01",
+    periodEndDate: "2026-10-28",
+    analysisDays: 28,
+    timeZone: "America/New_York",
+    settings: { leadTimeDays: 5, coverageDays: 7, safetyBufferDays: 2 },
+  };
+  const csv = csvExport.buildRestockCsv(recommendations, { [blueId]: "9" }, report);
+  const [headers, ...records] = parseCsvRecords(csv);
+  const requiredHeaders = [
+    "Variant ID", "Status", "Reason", "Period start date", "Period end date", "Analysis days", "Time zone",
+    "Lead time assumption (days)", "Coverage setting (days)", "Safety buffer assumption (days)",
+    "Calculated quantity", "Manual planning quantity",
+  ];
+  const defects = requiredHeaders.filter((header) => !headers.includes(header)).map((header) => `missing ${header} column`);
+  if (records.length !== recommendations.length) defects.push(`expected ${recommendations.length} report rows, found ${records.length}`);
+  const column = (name) => headers.indexOf(name);
+  const value = (record, name) => column(name) < 0 ? undefined : record[column(name)];
+  const rowFor = (variantId) => records.find((record) => value(record, "Variant ID") === variantId);
+
+  if (column("Variant ID") >= 0) {
+    const duplicateRows = records.filter((record) => value(record, "SKU") === "DUPLICATE-SKU");
+    if (new Set(duplicateRows.map((record) => value(record, "Variant ID"))).size !== 2) {
+      defects.push("duplicate-SKU variants are not preserved as two distinct Variant IDs");
+    }
+  }
+  const blue = rowFor(blueId);
+  const giftCard = rowFor(giftCardId);
+  if (!giftCard) defects.push("excluded non-physical variant row is omitted");
+  if (blue && column("Calculated quantity") >= 0 && value(blue, "Calculated quantity") !== "18") {
+    defects.push(`calculated quantity should remain 18, found ${value(blue, "Calculated quantity")}`);
+  }
+  if (blue && column("Manual planning quantity") >= 0 && value(blue, "Manual planning quantity") !== "9") {
+    defects.push(`manual planning quantity should be 9, found ${value(blue, "Manual planning quantity")}`);
+  }
+  if (blue && column("Status") >= 0 && value(blue, "Status") !== "calculated") defects.push("calculated row status is missing or incorrect");
+  if (blue && column("Reason") >= 0 && value(blue, "Reason") !== recommendations.find((row) => row.variantId === blueId).explanation) {
+    defects.push("calculated row explanation is missing from the Reason field");
+  }
+  if (giftCard && column("Status") >= 0 && value(giftCard, "Status") !== "excluded") defects.push("excluded row status is missing or incorrect");
+  if (giftCard && column("Reason") >= 0 && value(giftCard, "Reason") !== recommendations.find((row) => row.variantId === giftCardId).explanation) {
+    defects.push("excluded-row reason is missing from the Reason field");
+  }
+  const expectedAssumptions = {
+    "Period start date": "2026-10-01", "Period end date": "2026-10-28", "Analysis days": "28",
+    "Time zone": "America/New_York", "Lead time assumption (days)": "5", "Coverage setting (days)": "7",
+    "Safety buffer assumption (days)": "2",
+  };
+  for (const [header, expected] of Object.entries(expectedAssumptions)) {
+    if (blue && column(header) >= 0 && value(blue, header) !== expected) defects.push(`${header} assumption is missing or incorrect`);
+  }
+  assert.deepEqual(defects, [], `CSV export does not preserve the planning handoff:\n- ${defects.join("\n- ")}\nHeader: ${headers.join(", ")}`);
 });
 
 test("current-grant read_orders gate fails closed while inventory and demo remain independently usable", async () => {
