@@ -13,6 +13,7 @@ test("Shopify app shell exposes the app home and primary routes in App Bridge na
     ["Overview", "/app"],
     ["Stores", "/app/stores"],
     ["Products", "/app/products"],
+    ["Size Guides", "/app/size-guides"],
     ["Imports", "/app/imports"],
     ["Inventory Alerts", "/app/inventory-alerts"],
   ]) {

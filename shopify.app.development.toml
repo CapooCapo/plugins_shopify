@@ -9,7 +9,13 @@ embedded = true
 automatically_update_urls_on_dev = false
 
 [access_scopes]
-scopes = "read_products"
+scopes = "write_products"
 
 [auth]
 redirect_urls = ["https://<SHOPIFY_CLI_TUNNEL_HOST>/auth/callback"]
+
+[product.metafields.size_guide.chart]
+type = "json"
+name = "StockHub size guide"
+description = "Public size-chart data displayed by the StockHub theme block."
+access.storefront = "public_read"

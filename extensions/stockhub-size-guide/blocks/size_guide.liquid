@@ -1,0 +1,51 @@
+{% assign guide = product.metafields["$app:size_guide"].chart.value %}
+{% assign guide_id = "stockhub-size-guide-" | append: block.id %}
+
+<div class="stockhub-size-guide" {{ block.shopify_attributes }}>
+  <button
+    type="button"
+    class="stockhub-size-guide__trigger"
+    aria-haspopup="dialog"
+    aria-controls="{{ guide_id }}"
+    data-size-guide-open
+    style="--stockhub-guide-trigger-bg: {{ block.settings.trigger_background }}; --stockhub-guide-trigger-text: {{ block.settings.trigger_text_colour }}"
+  >{{ block.settings.trigger_text | escape }}</button>
+  <dialog id="{{ guide_id }}" class="stockhub-size-guide__dialog" aria-labelledby="{{ guide_id }}-title" data-size-guide-dialog>
+    <div class="stockhub-size-guide__panel">
+      <header class="stockhub-size-guide__header">
+        <h2 id="{{ guide_id }}-title">{% if guide.title != blank %}{{ guide.title | escape }}{% else %}Size guide{% endif %}</h2>
+        <button type="button" class="stockhub-size-guide__close" aria-label="Close size guide" data-size-guide-close>×</button>
+      </header>
+      {% if guide.columns.size > 0 and guide.rows.size > 0 %}
+        <div class="stockhub-size-guide__table-wrap" role="region" aria-label="{{ guide.title | default: 'Size guide' | escape }} measurements" tabindex="0">
+          <table>
+            <caption>{{ guide.title | escape }}{% if guide.unit != blank %} ({{ guide.unit | escape }}){% endif %}</caption>
+            <thead><tr>
+              {% for column in guide.columns %}<th scope="col">{{ column.name | escape }}{% if column.kind == "measurement" %} ({{ guide.unit | escape }}){% endif %}</th>{% endfor %}
+            </tr></thead>
+            <tbody>
+              {% for row in guide.rows %}<tr>{% for cell in row %}{% assign cell_column = guide.columns[forloop.index0] %}{% if cell_column.kind == "label" %}<th scope="row">{{ cell | escape }}</th>{% else %}<td>{{ cell | escape }}</td>{% endif %}{% endfor %}</tr>{% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="stockhub-size-guide__empty" role="status">A size guide is not available for this product yet.</p>
+      {% endif %}
+    </div>
+  </dialog>
+</div>
+
+<link rel="stylesheet" href="{{ 'size-guide.css' | asset_url }}" />
+<script src="{{ 'size-guide.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "StockHub Size Guide",
+  "target": "section",
+  "settings": [
+    { "type": "text", "id": "trigger_text", "label": "Button text", "default": "Size guide" },
+    { "type": "color", "id": "trigger_background", "label": "Button background", "default": "#1f2937" },
+    { "type": "color", "id": "trigger_text_colour", "label": "Button text colour", "default": "#ffffff" }
+  ]
+}
+{% endschema %}
