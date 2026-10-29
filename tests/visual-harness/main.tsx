@@ -1,112 +1,9 @@
 import { createRoot } from "react-dom/client";
-import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
-import { OverviewDashboard } from "../../app/components/OverviewDashboard";
-import type { OverviewAnalytics } from "../../app/utils/overview-analytics.server";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { ProductsCatalog } from "../../app/components/ProductsCatalog";
 import { matchedSkuProduct, pageInfo, products } from "./products-fixture";
+import { OverviewFixture } from "./overview-fixture";
 import "../../app/styles/stockhub.css";
-
-const data = {
-  shop: { name: "Example Outfitters", myshopifyDomain: "example-outfitters.myshopify.com" },
-  all: { count: 27, precision: "EXACT" as const },
-  active: { count: 15, precision: "EXACT" as const },
-  draft: { count: 11, precision: "EXACT" as const },
-};
-
-const imports = {
-  batchCount: 14,
-  attentionBatchCount: 3,
-  recent: [
-    { id: "fixture-1", receiptCode: "IMP-00214", locationName: "Main warehouse", createdAt: new Date("2026-10-22T08:00:00Z"), status: "COMPLETED" },
-    { id: "fixture-2", receiptCode: "IMP-00213", locationName: "East branch", createdAt: new Date("2026-10-21T07:00:00Z"), status: "UNCERTAIN" },
-    { id: "fixture-3", receiptCode: "IMP-00212", locationName: "Main warehouse", createdAt: new Date("2026-10-20T07:00:00Z"), status: "FAILED" },
-  ],
-  attention: [
-    { id: "fixture-2", receiptCode: "IMP-00213", locationName: "East branch", createdAt: new Date("2026-10-21T07:00:00Z"), updatedAt: new Date("2026-10-22T07:00:00Z"), status: "UNCERTAIN" },
-    { id: "fixture-3", receiptCode: "IMP-00212", locationName: "Main warehouse", createdAt: new Date("2026-10-20T07:00:00Z"), updatedAt: new Date("2026-10-20T07:00:00Z"), status: "FAILED" },
-  ],
-};
-
-const fixtureDaily = Array.from({ length: 30 }, (_, index) => {
-  const date = new Date(Date.UTC(2026, 8, 29 + index)).toISOString().slice(0, 10);
-  return { date, revenue: 120 + index * 8, orders: 2 + (index % 4), units: 3 + (index % 7) };
-});
-
-function overviewAnalytics(range: 7 | 30, missingSalesScope: boolean): OverviewAnalytics {
-  const daily = fixtureDaily.slice(-range);
-  const salesData = {
-    status: "ready" as const,
-    reason: undefined,
-    currencyCode: "USD",
-    totals: daily.reduce((totals, day) => ({
-      revenue: totals.revenue + (day.revenue ?? 0),
-      orders: totals.orders + day.orders,
-      units: totals.units + day.units,
-    }), { revenue: 0, orders: 0, units: 0 }),
-    daily,
-    topProducts: [
-      { id: "gid://shopify/Product/101", title: "Everyday Linen Shirt", legacyResourceId: "101", units: 42, revenue: 1840 },
-      { id: "gid://shopify/Product/102", title: "Canvas Tote", legacyResourceId: "102", units: 31, revenue: 620 },
-      { id: "gid://shopify/Product/103", title: "Merino Cardigan", legacyResourceId: "103", units: 18, revenue: 2160 },
-    ],
-    topVariants: [
-      { id: "gid://shopify/ProductVariant/1011", productId: "gid://shopify/Product/101", productTitle: "Everyday Linen Shirt", legacyResourceId: "1011", title: "S / Natural", sku: "LINEN-S-NAT", units: 21, revenue: 920 },
-      { id: "gid://shopify/ProductVariant/1012", productId: "gid://shopify/Product/101", productTitle: "Everyday Linen Shirt", legacyResourceId: "1012", title: "M / Natural", sku: "LINEN-M-NAT", units: 21, revenue: 920 },
-      { id: "gid://shopify/ProductVariant/1021", productId: "gid://shopify/Product/102", productTitle: "Canvas Tote", legacyResourceId: "1021", title: "One size", sku: "TOTE-CANVAS", units: 31, revenue: 620 },
-    ],
-    currencyMismatch: false,
-  };
-  const inventoryData = {
-    status: "ready" as const,
-    threshold: 5,
-    lowStockSkuCount: 2,
-    outOfStockSkuCount: 1,
-    lowStockVariants: [
-      { id: "gid://shopify/ProductVariant/5011", title: "Small / Forest", sku: "MUG-FOREST-S", product: { id: "gid://shopify/Product/501", title: "Stoneware Mug", legacyResourceId: "501" }, available: 2 },
-      { id: "gid://shopify/ProductVariant/5021", title: "One size", sku: "TOTE-NATURAL", product: { id: "gid://shopify/Product/502", title: "Market Tote", legacyResourceId: "502" }, available: 4 },
-    ],
-    outOfStockVariants: [
-      { id: "gid://shopify/ProductVariant/5031", title: "Black", sku: "CAP-BLK", product: { id: "gid://shopify/Product/503", title: "Cotton Cap", legacyResourceId: "503" }, available: 0 },
-    ],
-    unknownCount: 1,
-    untrackedCount: 2,
-    totalTrackedKnown: 128,
-  };
-  const fetchedAt = "2026-10-28T12:00:00.000Z";
-  // The ready sales fixture represents both required grants: read_orders and
-  // read_products (the service also selects Product/Variant identity).
-  return {
-    range,
-    timeZone: "America/New_York",
-    currencyCode: "USD",
-    scopesVerified: true,
-    salesMissingScopes: missingSalesScope ? ["read_orders"] : [],
-    inventoryMissingScopes: [],
-    sales: missingSalesScope
-      ? { status: "permission_required", data: null, message: "Sales analytics require the read_orders permission. Reauthorize StockHub after granting it; no order data was requested.", fetchedAt: null }
-      : { status: "ready", data: salesData, fetchedAt },
-    inventory: { status: "ready", data: inventoryData, fetchedAt },
-    fetchedAt,
-  };
-}
-
-function OverviewFixture() {
-  const location = useLocation();
-  const params = new URLSearchParams(location.search);
-  const range = params.get("range") === "7" ? 7 : 30;
-  const missingSalesScope = params.get("scenario") === "scope-missing";
-  return <div className="visual-fixture-shell">
-    <aside className="visual-fixture-badge" role="note" style={{ textAlign: "center", padding: "5px 8px", background: "#fff4ce", color: "#4a3b00", font: "600 10px/1.4 system-ui, sans-serif", borderBottom: "1px solid #e8d89a" }}>
-      LOCAL FIXTURE · NOT LIVE SHOPIFY ADMIN DATA
-    </aside>
-    <s-page inlineSize="large"><OverviewDashboard
-      data={data}
-      error={null}
-      imports={imports}
-      analytics={overviewAnalytics(range, missingSalesScope)}
-    /></s-page>
-  </div>;
-}
 
 import NewImport from "../../app/routes/app.imports._index";
 import CatalogImports from "../../app/routes/app.imports.catalog._index";
@@ -224,25 +121,33 @@ function measure() {
     cards,
     overview: selectedPage === "overview" ? {
       scenario: overviewParams.get("scenario") ?? "ready",
+      samplePreview: overviewParams.get("sample") === "1",
       range: overviewParams.get("range") === "7" ? 7 : 30,
       salesCards: [...document.querySelectorAll(".stockhub-overview-sales-metrics .stockhub-overview-metric")].map((element) => {
         const rect = element.getBoundingClientRect();
         return { label: element.querySelector(".stockhub-metric-label")?.textContent?.trim(), value: element.querySelector(".stockhub-metric-value")?.textContent?.trim(), x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
       }),
-      snapshotCards: [...document.querySelectorAll(".stockhub-overview-section:not(.stockhub-overview-analytics) .stockhub-overview-metric")].map((element) => {
-        const rect = element.getBoundingClientRect();
-        return { label: element.querySelector(".stockhub-metric-label")?.textContent?.trim(), value: element.querySelector(".stockhub-metric-value")?.textContent?.trim(), x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
-      }),
       rangeControls: [...document.querySelectorAll(".stockhub-overview-range a")].map((element) => ({ label: element.textContent?.trim(), href: element.getAttribute("href"), current: element.getAttribute("aria-current") })),
-      salesNotices: [...document.querySelectorAll(".stockhub-overview-analytics .stockhub-analytics-notice")].map((element) => element.textContent?.trim()),
+      salesNotices: [...document.querySelectorAll(".stockhub-overview-trend .stockhub-analytics-notice")].map((element) => element.textContent?.trim()),
+      salesEmptyStates: [...document.querySelectorAll(".stockhub-overview-trend .stockhub-analytics-empty")].map((element) => element.textContent?.trim()),
       salesTrend: box(".stockhub-overview-trend"),
-      salesBars: document.querySelectorAll(".stockhub-chart-bar-track").length,
-      salesRankingCount: document.querySelectorAll(".stockhub-overview-ranking-grid ol > li").length,
-      lowStockRows: document.querySelectorAll('.stockhub-overview-inventory-list[aria-label="Low-stock SKUs and variants"] > li').length,
-      outOfStockRows: document.querySelectorAll('.stockhub-overview-inventory-list[aria-label="Out-of-stock SKUs"] > li').length,
-      inventoryCounts: [...document.querySelectorAll(".stockhub-overview-inventory .stockhub-inventory-summary > div")].map((element) => element.textContent?.trim()),
-      shopCurrency: document.querySelector(".stockhub-overview-currency")?.textContent?.trim() ?? "",
+      chartMeasureLabel: document.querySelector(".stockhub-chart-measure-label")?.textContent?.trim() ?? "",
+      chartAxisTicks: [...document.querySelectorAll(".stockhub-chart-y-axis span")].map((element) => element.textContent?.trim()),
+      chartLineCount: document.querySelectorAll(".stockhub-chart-line").length,
+      chartAreaCount: document.querySelectorAll(".stockhub-chart-area").length,
+      salesPoints: document.querySelectorAll(".stockhub-chart-point").length,
+      inventoryPanel: box(".stockhub-overview-attention"),
+      rankingGrid: box(".stockhub-overview-analysis-grid"),
+      topProductTitle: document.querySelector(".stockhub-overview-best-sellers ol > li strong")?.textContent?.trim() ?? "",
+      inventoryNotes: [...document.querySelectorAll(".stockhub-overview-attention .stockhub-overview-metric-note")].map((element) => element.textContent?.trim()),
+      attentionRows: [...document.querySelectorAll(".stockhub-overview-attention-list > li")].map((element) => element.textContent?.trim() ?? ""),
+      salesRankingCount: document.querySelectorAll(".stockhub-overview-best-sellers ol > li").length,
+      lowStockRows: document.querySelectorAll(".stockhub-attention-status--low").length,
+      outOfStockRows: document.querySelectorAll(".stockhub-attention-status--out").length,
+      shopCurrency: document.querySelector(".stockhub-chart-measure-label")?.textContent?.trim() ?? "",
       fixtureLabel: document.querySelector(".visual-fixture-badge")?.textContent?.trim() ?? "",
+      sampleBadge: document.querySelector(".stockhub-overview-sample-badge")?.textContent?.trim() ?? "",
+      historyLink: (() => { const link = document.querySelector(".stockhub-overview-recent .stockhub-overview-section-heading a"); return { href: link?.getAttribute("href"), label: link?.textContent?.trim() }; })(),
     } : null,
     quickActions: box(".stockhub-overview-shortcuts"),
     overviewWorkspace: box(".stockhub-overview-workspace"),

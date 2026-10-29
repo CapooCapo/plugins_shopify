@@ -1,0 +1,183 @@
+.stockhub-products {
+  width: min(100%, 1280px);
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+}
+
+.stockhub-products-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  min-width: 0;
+}
+
+.stockhub-products-eyebrow {
+  color: var(--stockhub-brand-primary);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.stockhub-products-header h1 {
+  margin: 2px 0 0;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.stockhub-products-header p {
+  margin: 5px 0 0;
+  color: var(--stockhub-muted);
+  font-size: 14px;
+}
+
+.stockhub-products-shop {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  min-width: 0;
+  margin-top: 12px;
+  color: var(--stockhub-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.stockhub-products-shop strong {
+  color: var(--stockhub-ink);
+}
+
+.stockhub-products-count {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 20px;
+  color: var(--stockhub-muted);
+  font-size: 13px;
+}
+
+.stockhub-products-count strong {
+  color: var(--stockhub-ink);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.stockhub-products-filters,
+.stockhub-products-results,
+.stockhub-products-state {
+  min-width: 0;
+  border: 1px solid var(--stockhub-border);
+  border-radius: 12px;
+  background: var(--stockhub-surface);
+}
+
+.stockhub-products-filters {
+  padding: 16px 20px;
+}
+
+.stockhub-products-filter-form {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(170px, 0.6fr) minmax(180px, 0.65fr) minmax(110px, 0.4fr) auto;
+  align-items: end;
+  gap: 12px;
+  min-width: 0;
+}
+
+.stockhub-products-filter-form > :where(s-text-field, s-select) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.stockhub-products-active-filter {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+  color: var(--stockhub-muted);
+  font-size: 13px;
+}
+
+.stockhub-products-active-filter a,
+.stockhub-products-state a,
+.stockhub-product-actions a {
+  color: var(--stockhub-brand-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.stockhub-products-active-filter a:hover,
+.stockhub-products-state a:hover,
+.stockhub-product-actions a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.stockhub-products-results {
+  overflow: hidden;
+}
+
+.stockhub-products-results-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 16px 20px 12px;
+}
+
+.stockhub-products-results-heading h2,
+.stockhub-products-state h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.stockhub-products-results-heading p,
+.stockhub-products-results-heading > span {
+  margin: 2px 0 0;
+  color: var(--stockhub-muted);
+  font-size: 13px;
+}
+
+.stockhub-products-table-wrap { width: 100%; overflow-x: auto; }
+
+.stockhub-products-table {
+  min-width: 900px;
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 14px;
+}
+
+.stockhub-products-table th {
+  border-block: 1px solid var(--stockhub-border);
+  background: var(--stockhub-canvas);
+  color: var(--stockhub-muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.stockhub-products-table th,
+.stockhub-products-table td {
+  padding: 12px 14px;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.stockhub-products-table th:first-child,
+.stockhub-products-table td:first-child { padding-left: 20px; }
+.stockhub-products-table th:last-child,
+.stockhub-products-table td:last-child { padding-right: 20px; }
+.stockhub-products-table th:nth-child(1) { width: 32%; }
+.stockhub-products-table th:nth-child(2) { width: 15%; }
+.stockhub-products-table th:nth-child(3) { width: 10%; }
+.stockhub-products-table th:nth-child(4) { width: 15%; }
+.stockhub-products-table th:nth-child(5) { width: 12%; }
+.stockhub-products-table th:nth-child(6) { width: 16%; }
+
+.stockhub-product-row:not(:last-child) td {
+  border-bottom: 1px solid var(--stockhub-border);
+}

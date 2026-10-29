@@ -5,7 +5,15 @@ import test from "node:test";
 import ts from "typescript";
 
 const detailRoute = new URL("../app/routes/app.imports.history.$batchId.tsx", import.meta.url);
-const stylesheet = new URL("../app/styles/stockhub.css", import.meta.url);
+
+async function stockhubStyles() {
+  const manifest = await readFile(new URL("../app/styles/stockhub.css", import.meta.url), "utf8");
+  const paths = [...manifest.matchAll(/@import\s+["']\.\/stockhub\/([^"']+\.css)["'];/g)]
+    .map(([, path]) => path);
+  return (await Promise.all(paths.map((path) =>
+    readFile(new URL("../app/styles/stockhub/" + path, import.meta.url), "utf8"),
+  ))).join("\n");
+}
 
 async function loadProgressHelpers() {
   const source = await readFile(detailRoute, "utf8");
@@ -132,7 +140,7 @@ test("a blocked terminal receipt with no eligible lines gives accurate read-only
 test("receipt UI uses accessible operation cards, hides zero-row confirmation, and keeps the server confirmation contract", async () => {
   const [source, css] = await Promise.all([
     readFile(detailRoute, "utf8"),
-    readFile(stylesheet, "utf8"),
+    stockhubStyles(),
   ]);
 
   assert.match(source, /aria-label="Import line completion"/);

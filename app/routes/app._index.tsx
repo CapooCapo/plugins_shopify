@@ -2,115 +2,43 @@ import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useNavigation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
-import { getGraphQLData } from "../utils/shopify-graphql.server";
 import { OverviewDashboard } from "../components/OverviewDashboard";
 import { loadOverviewAnalytics } from "../utils/overview-analytics.server";
+import { createSampleOverviewAnalytics } from "../utils/overview-analytics-demo";
+import { createSampleOverviewImports } from "../utils/overview-imports-demo";
+import type { OverviewData } from "../utils/overview-types";
+import { loadRecentOverviewImports } from "../utils/overview-imports.server";
+import { loadOverviewStoreData } from "../utils/overview-store.server";
 
-export type ProductCount = { count: number; precision: "EXACT" | "AT_LEAST" };
+export type { ImportOverview, OverviewData, ProductCount, RecentImport } from "../utils/overview-types";
 
-export type OverviewData = {
-  shop: { name: string; myshopifyDomain: string; ianaTimezone?: string; currencyCode?: string };
-  all: ProductCount;
-  active: ProductCount;
-  draft: ProductCount;
-};
-
-export type RecentImport = {
-  id: string;
-  receiptCode: string;
-  locationName: string;
-  createdAt: Date;
-  updatedAt?: Date;
-  status: string;
-};
-
-export type ImportOverview = {
-  batchCount: number;
-  attentionBatchCount: number;
-  recent: RecentImport[];
-  attention: RecentImport[];
-};
-
-type ImportBatchStatusCount = { status: string; _count: { _all: number } };
-
-export function summarizeImportBatchStatusCounts(groups: ImportBatchStatusCount[]) {
-  return groups.reduce(
-    (counts, group) => ({
-      batchCount: counts.batchCount + group._count._all,
-      attentionBatchCount:
-        counts.attentionBatchCount +
-        (["FAILED", "UNCERTAIN", "PARTIAL"].includes(group.status) ? group._count._all : 0),
-    }),
-    { batchCount: 0, attentionBatchCount: 0 },
-  );
-}
+const SAMPLE_TIME_ZONE = "America/New_York";
+const SAMPLE_NOW = new Date("2026-10-29T12:00:00.000Z");
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session, scopes } = await authenticate.admin(request);
   const url = new URL(request.url);
   const range: 7 | 30 = url.searchParams.get("range") === "7" ? 7 : 30;
-  const importsPromise: Promise<ImportOverview | null> = Promise.all([
-    prisma.importBatch.groupBy({
-      by: ["status"],
-      where: { shop: session.shop },
-      _count: { _all: true },
-    }),
-    prisma.importBatch.findMany({
-      where: { shop: session.shop },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 5,
-      select: {
-        id: true,
-        receiptCode: true,
-        locationName: true,
-        createdAt: true,
-        status: true,
-      },
-    }),
-    prisma.importBatch.findMany({
-      where: { shop: session.shop, status: { in: ["FAILED", "UNCERTAIN", "PARTIAL"] } },
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-      take: 5,
-      select: { id: true, receiptCode: true, locationName: true, createdAt: true, updatedAt: true, status: true },
-    }),
-  ]).then(([statusCounts, recent, attention]) => ({
-    ...summarizeImportBatchStatusCounts(statusCounts),
-    recent,
-    attention,
-  })).catch(() => null);
+  const samplePreview = url.searchParams.get("sample") === "1";
+  if (samplePreview) {
+    return {
+      data: null,
+      storeName: "Example Outfitters",
+      error: null,
+      imports: createSampleOverviewImports(),
+      analytics: createSampleOverviewAnalytics(range, SAMPLE_TIME_ZONE, SAMPLE_NOW),
+      samplePreview: true,
+    };
+  }
 
+  const importsPromise = loadRecentOverviewImports(session.shop);
   let data: OverviewData | null = null;
   let error: string | null = null;
   try {
-    const response = await admin.graphql(
-      `#graphql
-        query StockHubOverview {
-          shop {
-            name
-            myshopifyDomain
-            ianaTimezone
-            currencyCode
-          }
-          all: productsCount(limit: null) {
-            count
-            precision
-          }
-          active: productsCount(query: "status:active", limit: null) {
-            count
-            precision
-          }
-          draft: productsCount(query: "status:draft", limit: null) {
-            count
-            precision
-          }
-        }`,
-    );
-    data = await getGraphQLData<OverviewData>(response);
+    data = await loadOverviewStoreData(admin);
   } catch {
     error = "Shopify product data could not be loaded. Confirm the app has read_products access and try again.";
   }
-
   const analytics = await loadOverviewAnalytics({
     admin,
     scopes,
@@ -120,19 +48,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     currencyCode: data?.shop.currencyCode ?? null,
     signal: request.signal,
   });
-  return { data, error, imports: await importsPromise, analytics };
+  return { data, storeName: data?.shop.name ?? session.shop, error, imports: await importsPromise, analytics, samplePreview: false };
 };
 
 export default function Overview() {
-  const { data, error, imports, analytics } = useLoaderData<typeof loader>();
+  const { data, storeName, error, imports, analytics, samplePreview } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
-
-  return (
-    <s-page inlineSize="large">
-      <OverviewDashboard data={data} error={error} imports={imports} analytics={analytics} loading={navigation.state === "loading"} />
-    </s-page>
-  );
+  return <s-page inlineSize="large">
+    <OverviewDashboard data={data} storeName={storeName} error={error} imports={imports} analytics={analytics} samplePreview={samplePreview} loading={navigation.state === "loading"} />
+  </s-page>;
 }
 
-export const headers: HeadersFunction = (headersArgs) =>
-  boundary.headers(headersArgs);
+export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);

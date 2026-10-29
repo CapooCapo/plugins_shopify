@@ -1,20 +1,30 @@
 /* eslint-env node */
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import ts from "typescript";
+import { createServer } from "vite";
 
-const analyticsModule = new URL("../app/utils/overview-analytics.shared.ts", import.meta.url);
+const vite = await createServer({
+  configFile: false,
+  root: process.cwd(),
+  appType: "custom",
+  server: { middlewareMode: true, hmr: false },
+  optimizeDeps: { noDiscovery: true, include: [], entries: [] },
+  logLevel: "error",
+});
+test.after(async () => vite.close());
 
 async function loadAnalyticsHelpers() {
-  const source = await readFile(analyticsModule, "utf8");
-  const javascript = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-  }).outputText;
-  const helpers = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+  const helpers = await vite.ssrLoadModule("/app/utils/overview-analytics.shared.ts");
   for (const name of ["computeShopLocalDateWindow", "aggregateSalesOrders", "aggregateInventoryVariants"]) {
     assert.equal(typeof helpers[name], "function", `${name} must be exported from the shared analytics module`);
   }
+  return helpers;
+}
+
+async function loadSampleAnalyticsHelpers() {
+  const helpers = await vite.ssrLoadModule("/app/utils/overview-analytics-demo.ts");
+  assert.equal(typeof helpers.createSampleSalesSection, "function",
+    "createSampleSalesSection must be exported from the sample analytics module");
   return helpers;
 }
 
@@ -45,6 +55,27 @@ test("sales windows use shop-local calendar days, include today, and return UTC 
   assert.equal(thirtyDays.dates.at(-1), "2026-10-28", "the selected local day includes today");
   assert.equal(thirtyDays.startUtc, "2026-09-28T17:00:00.000Z");
   assert.equal(thirtyDays.endExclusiveUtc, "2026-10-28T17:00:00.000Z");
+});
+
+test("sample daily sales metrics are stable across overlapping 7-day and 30-day shop-local windows", async () => {
+  const { createSampleSalesSection } = await loadSampleAnalyticsHelpers();
+  const timeZone = "Asia/Ho_Chi_Minh";
+  const now = new Date("2026-10-28T16:30:00.000Z");
+  const sevenDayDaily = createSampleSalesSection(7, timeZone, now).data.daily;
+  const thirtyDayDaily = createSampleSalesSection(30, timeZone, now).data.daily;
+  const thirtyDayByDate = new Map(thirtyDayDaily.map((day) => [day.date, day]));
+  const overlappingDays = sevenDayDaily.filter(({ date }) => thirtyDayByDate.has(date));
+
+  assert.equal(overlappingDays.length, sevenDayDaily.length,
+    "the 30-day window must contain every shop-local date in the 7-day window");
+  for (const { date, revenue, orders, units } of overlappingDays) {
+    const thirtyDayEntry = thirtyDayByDate.get(date);
+    assert.deepEqual(
+      { revenue, orders, units },
+      { revenue: thirtyDayEntry.revenue, orders: thirtyDayEntry.orders, units: thirtyDayEntry.units },
+      `sample daily metrics must match for the overlapping shop-local date ${date}`,
+    );
+  }
 });
 
 const money = (amount, currencyCode = "USD") => ({ shopMoney: { amount: String(amount), currencyCode } });
@@ -293,4 +324,21 @@ test("inventory aggregation classifies duplicate nonempty SKUs by their combined
     "a duplicate SKU with any unknown variant is not classified from only the known quantity");
   assert.equal(result.outOfStockVariants.some(({ sku }) => sku === "SHARED-UNKNOWN"), false,
     "unknown duplicate-SKU availability is not treated as zero");
+});
+
+test("gift card variants are counted as non-physical and excluded from restock totals", async () => {
+  const { aggregateInventoryVariants } = await loadAnalyticsHelpers();
+  const result = aggregateInventoryVariants([{
+    id: "gift-card-variant",
+    title: "Digital gift card",
+    sku: "GIFT-25",
+    product: { id: "gift-card-product", title: "Digital Gift Card", giftCard: true },
+    tracked: true,
+    levels: [{ isActive: true, available: 0 }],
+  }]);
+
+  assert.equal(result.nonPhysicalCount, 1);
+  assert.equal(result.outOfStockSkuCount, 0);
+  assert.equal(result.lowStockSkuCount, 0);
+  assert.equal(result.totalTrackedKnown, 0);
 });

@@ -56,16 +56,15 @@ test("untracked-only inventory is explicitly partial and is not presented as ver
 });
 
 test("Overview labels partial inventory counts as observed data, not as a guaranteed lower bound", async () => {
-  const dashboard = await readFile(repoFile("app/components/OverviewDashboard.tsx"), "utf8");
-  assert.match(dashboard, /function inventorySkuCountLabel\(value: number, partial: boolean\)[\s\S]*?partial \? "Observed "/,
+  const metrics = await readFile(repoFile("app/components/overview/OverviewMetrics.tsx"), "utf8");
+  const attention = await readFile(repoFile("app/components/overview/InventoryAttention.tsx"), "utf8");
+  assert.match(metrics, /analytics\.inventory\.status === "partial" \? "Observed "/,
     "partial inventory counts must be presented as observations, since unseen duplicate-SKU variants can change the aggregate classification");
-  assert.doesNotMatch(dashboard, /function inventorySkuCountLabel\(value: number, partial: boolean\)[\s\S]*?partial \? "At least "/,
+  assert.doesNotMatch(metrics, /analytics\.inventory\.status === "partial" \? "At least "/,
     "a partial count is not necessarily a lower bound when unread variants can share a SKU and move it across the threshold");
-  assert.equal([...dashboard.matchAll(/inventorySkuCountLabel\(inventory\.(?:lowStockSkuCount|outOfStockSkuCount), analytics\.inventory\.status === "partial"\)/g)].length, 3,
-    "the low-stock KPI and both inventory summary counts use the partial-aware observed label");
-  assert.match(dashboard, /<AnalyticsNotice status=\{analytics\.inventory\.status\} message=\{analytics\.inventory\.message\} \/>/,
-    "the inventory section retains the explicit partial-data explanation alongside observed counts");
-  assert.match(dashboard, /No low-stock or out-of-stock SKU can be confirmed from the available tracked inventory data\./,
+  assert.match(attention, /analytics\.inventory\.status === "partial" && analytics\.inventory\.message/,
+    "the inventory attention section retains its explicit partial-data explanation alongside observed counts");
+  assert.match(attention, /Unknown and untracked inventory is excluded, never treated as zero/,
     "unknown or untracked availability is not described as verified zero stock");
 });
 

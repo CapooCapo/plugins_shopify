@@ -1,0 +1,242 @@
+
+.stockhub-overview-analytics-heading {
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.stockhub-overview-analytics-heading h2 {
+  font-size: 17px;
+}
+
+.stockhub-overview-analytics-heading p {
+  margin-top: 3px;
+}
+
+.stockhub-analytics-notice {
+  margin: 0;
+  border-left: 3px solid var(--stockhub-brand-secondary);
+  border-radius: 4px;
+  background: #edf4ff;
+  color: #1e3a5f;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 9px 11px;
+}
+
+.stockhub-analytics-notice--partial {
+  border-left-color: var(--stockhub-warning);
+  background: #fff8e8;
+  color: #624300;
+}
+
+.stockhub-analytics-notice--error {
+  border-left-color: var(--stockhub-error);
+  background: #fff2f0;
+  color: #7a1d16;
+}
+
+.stockhub-analytics-empty {
+  display: grid;
+  min-height: 144px;
+  place-items: center;
+  border: 1px dashed var(--stockhub-border);
+  border-radius: 8px;
+  color: var(--stockhub-muted);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 20px;
+  text-align: center;
+}
+
+.stockhub-chart-measure-label {
+  margin: 10px 0 0;
+  color: var(--stockhub-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stockhub-chart-layout {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.stockhub-chart-y-axis {
+  display: grid;
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  min-height: 190px;
+  text-align: right;
+}
+
+.stockhub-chart-y-axis span {
+  align-self: center;
+  white-space: nowrap;
+}
+
+.stockhub-chart-y-axis span:first-child { align-self: start; }
+.stockhub-chart-y-axis span:last-child { align-self: end; }
+.stockhub-chart-visual { min-width: 0; }
+
+.stockhub-chart-plot {
+  display: block;
+  width: 100%;
+  height: 190px;
+  overflow: visible;
+}
+
+.stockhub-chart-x-axis {
+  display: grid;
+  min-width: 0;
+  margin-top: 5px;
+}
+
+.stockhub-chart-x-axis span {
+  min-width: 0;
+  overflow: visible;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.stockhub-inventory-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.stockhub-inventory-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  border-radius: 8px;
+  background: #f5f8fb;
+  padding: 10px 12px;
+}
+
+.stockhub-inventory-summary span {
+  color: var(--stockhub-muted);
+  font-size: 12px;
+}
+
+.stockhub-inventory-summary strong {
+  color: var(--stockhub-ink);
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.stockhub-overview-ranking {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stockhub-overview-ranking li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  border-top: 1px solid var(--stockhub-border);
+  padding: 13px 0;
+}
+
+.stockhub-overview-ranking li:first-child { border-top: 0; }
+
+.stockhub-overview-ranking > li > img,
+.stockhub-ranking-image-placeholder {
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  border-radius: 7px;
+  background: #f0f4f8;
+  object-fit: cover;
+}
+
+.stockhub-ranking-image-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--stockhub-muted);
+  font-size: 20px;
+}
+
+.stockhub-overview-ranking-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.stockhub-overview-ranking-copy strong,
+.stockhub-overview-ranking-copy > span {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.stockhub-overview-ranking-copy strong {
+  color: var(--stockhub-ink);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.stockhub-overview-ranking-copy a {
+  color: var(--stockhub-brand-primary);
+  text-decoration: none;
+}
+
+.stockhub-overview-ranking-copy a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.stockhub-overview-ranking-copy > span {
+  color: var(--stockhub-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.stockhub-overview-ranking-value {
+  flex: none;
+  color: var(--stockhub-ink);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: right;
+}
+
+.stockhub-current-shop {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 10px;
+  padding: 5px 12px;
+  border: 1px solid var(--stockhub-border);
+  border-radius: 999px;
+  background: var(--stockhub-surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  color: var(--stockhub-muted);
+  font-size: 13px;
+}
+
+.stockhub-current-shop strong {
+  color: var(--stockhub-ink);
+}
+
+.stockhub-current-shop-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--stockhub-success);
+  box-shadow: 0 0 0 2px rgba(22, 121, 78, 0.2);
+}
+
+.stockhub-shop-domain {
+  overflow-wrap: anywhere;
+}
+
+.stockhub-overview-section {
+  min-width: 0;
+}
