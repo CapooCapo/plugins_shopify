@@ -226,7 +226,7 @@ test("verification action authenticates first and scopes receipt lookup to the s
   assert.ok(authIndex >= 0 && intentIndex > authIndex, "authenticate.admin must run before intent routing");
 
   const verifyStart = action.indexOf('if (intent === "verifyShopifyState")');
-  const verifyEnd = action.indexOf('if (intent === "merge" || intent === "resume")', verifyStart);
+  const verifyEnd = action.indexOf('if (["merge", "resume", "continueMerge"', verifyStart);
   assert.ok(verifyStart >= 0 && verifyEnd > verifyStart, "verification intent branch must be explicit");
   const verifyBranch = action.slice(verifyStart, verifyEnd);
   assert.match(verifyBranch, /prisma\.importBatch\.findFirst\(\{\s*where:\s*\{\s*id:\s*batchId,\s*shop:\s*session\.shop\s*\}/,
@@ -237,7 +237,7 @@ test("verification requires current read grants and an active authorized receipt
   const source = await readFile(new URL("../app/routes/app.imports._index.tsx", import.meta.url), "utf8");
   const action = source.slice(source.indexOf("export const action ="));
   const verifyStart = action.indexOf('if (intent === "verifyShopifyState")');
-  const verifyEnd = action.indexOf('if (intent === "merge" || intent === "resume")', verifyStart);
+  const verifyEnd = action.indexOf('if (["merge", "resume", "continueMerge"', verifyStart);
   assert.ok(verifyStart >= 0 && verifyEnd > verifyStart, "verification intent branch must be explicit");
   const verifyBranch = action.slice(verifyStart, verifyEnd);
 

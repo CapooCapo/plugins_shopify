@@ -9,6 +9,15 @@ async function source(name) {
   return readFile(routeUrl(name), "utf8");
 }
 
+async function stockhubStyles() {
+  const manifest = await readFile(new URL("../app/styles/stockhub.css", import.meta.url), "utf8");
+  const paths = [...manifest.matchAll(/@import\s+["']\.\/stockhub\/([^"']+\.css)["'];/g)]
+    .map(([, path]) => path);
+  return (await Promise.all(paths.map((path) =>
+    readFile(new URL("../app/styles/stockhub/" + path, import.meta.url), "utf8"),
+  ))).join("\n");
+}
+
 function disclosure(sourceText, summary) {
   const escapedSummary = summary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return sourceText.match(new RegExp(`<details>\\s*<summary>${escapedSummary}<\\/summary>[\\s\\S]*?<\\/details>`))?.[0] ?? "";
@@ -181,7 +190,7 @@ test("History announces the current result count, filters, and newer/older avail
 
 test("History filters retain GET fields and stack at the narrow embedded-app viewport", async () => {
   const history = await source("app.imports.history._index.tsx");
-  const styles = await readFile(new URL("../app/styles/stockhub.css", import.meta.url), "utf8");
+  const styles = await stockhubStyles();
   const formStart = history.indexOf('<Form method="get">');
   const formEnd = history.indexOf("</Form>", formStart);
   const filterForm = history.slice(formStart, formEnd);
@@ -231,7 +240,7 @@ test("New Import presents a safe upload-to-receipt workflow without adding merge
 test("receipt workspace keeps the table primary and uses one accessible product drawer for row CRUD", async () => {
   const [detail, styles] = await Promise.all([
     source("app.imports.history.$batchId.tsx"),
-    readFile(new URL("../app/styles/stockhub.css", import.meta.url), "utf8"),
+    stockhubStyles(),
   ]);
 
   assert.match(detail, /className="stockhub-line-toolbar__summary"><strong>\{filteredLines\.length\}<\/strong><span>shown of \{batch\.lines\.length\}/,

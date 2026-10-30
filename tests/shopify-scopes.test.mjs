@@ -115,7 +115,7 @@ test("conflicting current Shopify scope responses disable the loader UI and reje
     "the receipt action requires verified read scopes and inventory write, and requires product write only when eligible product creation needs it");
   assert.match(
     action,
-    /const needsProductWrite\s*=\s*batch\.lines\.some\([\s\S]*?line\.operationType\s*===\s*"CREATE_DRAFT"[\s\S]*?!\["VARIANT_PRICE_CONFIGURED",\s*"INVENTORY_ACTIVATING",\s*"INVENTORY_ACTIVE"\]\.includes\(line\.stage\)[\s\S]*?if\s*\(needsProductWrite\)\s*neededScopes\.add\("write_products"\)/,
+    /const needsProductWrite\s*=\s*eligibleLines\.some\([\s\S]*?line\.operationType\s*===\s*"CREATE_DRAFT"[\s\S]*?!\["VARIANT_PRICE_CONFIGURED",\s*"INVENTORY_ACTIVATING",\s*"INVENTORY_ACTIVE"\]\.includes\(line\.stage\)[\s\S]*?if\s*\(needsProductWrite\)\s*neededScopes\.add\("write_products"\)/,
     "the action's write_products requirement must remain conditional on an eligible product-creation stage",
   );
   assert.match(

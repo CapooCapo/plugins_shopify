@@ -1,0 +1,81 @@
+.stockhub-restock { display: grid; gap: 18px; }
+.stockhub-restock-header,
+.stockhub-restock-results-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.stockhub-restock-header h1 { margin: 2px 0 8px; color: var(--stockhub-ink, #172b4d); font-size: clamp(27px, 3vw, 36px); }
+.stockhub-restock-header p,
+.stockhub-restock-settings p,
+.stockhub-restock-results-heading p { margin: 0; color: var(--stockhub-muted, #667085); }
+.stockhub-eyebrow { color: #1570ef !important; font-size: 11px; font-weight: 750; letter-spacing: .09em; }
+.stockhub-restock-actions { display: flex; align-items: end; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.stockhub-restock-actions label,
+.stockhub-restock-filters label,
+.stockhub-restock-settings-fields label { display: grid; gap: 5px; color: #475467; font-size: 12px; font-weight: 650; }
+.stockhub-restock select,
+.stockhub-restock input { min-width: 0; border: 1px solid #d0d5dd; border-radius: 7px; background: #fff; color: #101828; padding: 9px 10px; font: inherit; }
+.stockhub-restock select:focus,
+.stockhub-restock input:focus { outline: 2px solid #84caff; outline-offset: 1px; }
+.stockhub-button { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; padding: 8px 12px; border: 1px solid #d0d5dd; border-radius: 7px; background: #fff; color: #344054; text-decoration: none; font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
+.stockhub-button:hover { background: #f8fafc; }
+.stockhub-button--primary { background: #175cd3; border-color: #175cd3; color: #fff; }
+.stockhub-button--primary:hover { background: #1849a9; }
+.stockhub-restock-freshness { display: flex; justify-content: space-between; gap: 12px; padding: 11px 14px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; color: #475467; font-size: 12px; }
+.stockhub-restock-settings { display: grid; gap: 14px; padding: 18px; border: 1px solid #d0d5dd; border-radius: 10px; background: #fff; }
+.stockhub-restock-settings h2,
+.stockhub-restock-results h2 { margin: 0 0 5px; color: #101828; font-size: 18px; }
+.stockhub-restock-settings-fields { display: grid; grid-template-columns: repeat(3, minmax(140px, 1fr)); gap: 12px; max-width: 850px; }
+.stockhub-restock-settings-fields input { width: 100%; }
+.stockhub-restock-note { margin: 0; color: #475467; font-size: 12px; }
+.stockhub-restock-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.stockhub-restock-summary article { display: grid; gap: 4px; padding: 16px; border: 1px solid #e4e7ec; border-radius: 9px; background: #fff; }
+.stockhub-restock-summary strong { color: #101828; font-size: 25px; font-variant-numeric: tabular-nums; }
+.stockhub-restock-summary span { color: #667085; font-size: 12px; }
+.stockhub-restock-results { display: grid; gap: 14px; padding: 18px; border: 1px solid #d0d5dd; border-radius: 10px; background: #fff; }
+.stockhub-restock-results-heading { align-items: center; }
+.stockhub-restock-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; }
+.stockhub-restock-filters label:first-child { flex: 1 1 260px; }
+.stockhub-restock-filters input { width: 100%; }
+.stockhub-restock-table-wrap { width: 100%; overflow-x: auto; }
+.stockhub-restock-table { width: 100%; min-width: 1040px; border-collapse: collapse; color: #344054; font-size: 12px; }
+.stockhub-restock-table th { padding: 10px 8px; border-bottom: 1px solid #d0d5dd; color: #667085; text-align: left; white-space: nowrap; }
+.stockhub-restock-table th button { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+.stockhub-restock-table td { padding: 11px 8px; border-bottom: 1px solid #eaecf0; vertical-align: top; overflow-wrap: anywhere; }
+.stockhub-restock-table tbody tr:hover { background: #f9fafb; }
+.stockhub-restock-table td:first-child { min-width: 155px; }
+.stockhub-restock-table td:first-child strong,
+.stockhub-restock-table td:first-child span,
+.stockhub-restock-table td small { display: block; }
+.stockhub-restock-table td:first-child span { margin-top: 3px; color: #667085; }
+.stockhub-restock-table td small { margin-top: 3px; color: #667085; font-size: 10px; }
+.stockhub-restock-manual input { width: 95px; }
+.stockhub-restock-invalid { color: #b42318 !important; }
+.stockhub-restock-status { display: inline-block; padding: 4px 7px; border-radius: 999px; background: #f2f4f7; color: #344054; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.stockhub-restock-status--urgent { background: #fee4e2; color: #b42318; }
+.stockhub-restock-status--high { background: #fef0c7; color: #93370d; }
+.stockhub-restock-status--review { background: #fef0c7; color: #93370d; }
+.stockhub-restock-status--excluded { background: #f2f4f7; color: #667085; }
+.stockhub-restock-table details { margin-top: 7px; max-width: 220px; }
+.stockhub-restock-table summary { color: #175cd3; cursor: pointer; font-weight: 650; }
+.stockhub-restock-table details p { margin: 5px 0; color: #475467; line-height: 1.45; white-space: normal; }
+.stockhub-restock-empty { padding: 22px; border: 1px dashed #d0d5dd; border-radius: 8px; color: #667085; text-align: center; }
+.stockhub-restock-empty h3 { margin: 0 0 6px; color: #344054; }
+.stockhub-restock-empty p { margin: 0; }
+.stockhub-restock-footnote { margin: 0; color: #667085; font-size: 11px; line-height: 1.5; }
+.stockhub-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+@media (max-width: 720px) {
+  .stockhub-restock-header, .stockhub-restock-results-heading { flex-direction: column; align-items: stretch; }
+  .stockhub-restock-actions { justify-content: flex-start; }
+  .stockhub-restock-freshness { flex-direction: column; }
+  .stockhub-restock-settings-fields { grid-template-columns: 1fr; }
+  .stockhub-restock-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stockhub-restock-results { padding: 13px; }
+  .stockhub-restock-table-wrap { overflow: visible; }
+  .stockhub-restock-table { min-width: 0; }
+  .stockhub-restock-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+  .stockhub-restock-table, .stockhub-restock-table tbody, .stockhub-restock-table tr, .stockhub-restock-table td { display: block; width: 100%; }
+  .stockhub-restock-table tbody tr { margin: 0 0 12px; padding: 8px 10px; border: 1px solid #e4e7ec; border-radius: 8px; }
+  .stockhub-restock-table td { display: grid; grid-template-columns: minmax(110px, 40%) minmax(0, 1fr); gap: 8px; padding: 7px 0; border: 0; }
+  .stockhub-restock-table td::before { content: attr(data-label); color: #667085; font-size: 11px; font-weight: 650; }
+  .stockhub-restock-table td:first-child { min-width: 0; }
+  .stockhub-restock-table details { max-width: none; }
+}

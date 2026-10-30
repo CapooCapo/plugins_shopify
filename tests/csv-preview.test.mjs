@@ -93,15 +93,50 @@ test("rejects malformed quoting and empty/header-only files", () => {
   assert.throws(() => parseCsvPreview("sku,quantity\n"), CsvFormatError);
 });
 
-test("enforces the documented data-row limit", () => {
+test("rejects 1,001 inventory data rows instead of truncating the source", () => {
   const rows = Array.from(
-    { length: MAX_CSV_ROWS + 1 },
+    { length: 1001 },
     (_, index) => `SKU-${index},Item,1`,
   );
   assert.throws(
     () => parseCsvPreview(`sku,title,quantity\n${rows.join("\n")}`),
-    /row limit/,
+    /1,000|1000|row limit/i,
   );
+});
+
+test("accepts a complete 1,000-row inventory file with stable source row identities", () => {
+  assert.equal(MAX_CSV_ROWS, 1000, "Inventory and Catalog uploads share a 1,000-row logical-file limit");
+  const sourceRows = Array.from({ length: 1000 }, (_, index) =>
+    `CAP-${String(index + 1).padStart(4, "0")},Capacity item ${index + 1},${index + 1}`,
+  );
+  const parsed = parseCsvPreview(`sku,title,quantity\n${sourceRows.join("\n")}`);
+
+  assert.equal(parsed.length, 1000, "every CSV data row must be represented exactly once");
+  assert.equal(parsed[0].rowNumber, 2);
+  assert.equal(parsed[0].sku, "CAP-0001");
+  assert.equal(parsed[0].quantity, 1);
+  assert.equal(parsed.at(-1).rowNumber, 1001);
+  assert.equal(parsed.at(-1).sku, "CAP-1000");
+  assert.equal(parsed.at(-1).quantity, 1000);
+  assert.ok(parsed.every((row) => row.errors.length === 0));
+  assert.equal(new Set(parsed.map((row) => row.rowNumber)).size, 1000);
+  assert.equal(new Set(parsed.map((row) => row.sku)).size, 1000);
+});
+
+test("accounts for duplicate SKUs at opposite ends of a 1,000-row inventory upload", () => {
+  const sourceRows = Array.from({ length: 1000 }, (_, index) =>
+    `${index === 999 ? "LATE-DUPLICATE" : index === 0 ? "LATE-DUPLICATE" : `UNIQUE-${index}`},Item ${index + 1},1`,
+  );
+  const parsed = parseCsvPreview(`sku,title,quantity\n${sourceRows.join("\n")}`);
+
+  assert.equal(parsed.length, 1000);
+  assert.equal(parsed[0].rowNumber, 2);
+  assert.equal(parsed.at(-1).rowNumber, 1001);
+  for (const row of [parsed[0], parsed.at(-1)]) {
+    assert.ok(row.errors.some((error) => error.includes("appears more than once")),
+      `duplicate SKU on source row ${row.rowNumber} must be blocked`);
+  }
+  assert.equal(parsed.slice(1, -1).filter((row) => row.errors.length > 0).length, 0);
 });
 
 test("calculates an aggregate proposed delta only for one exact match", () => {

@@ -1,0 +1,152 @@
+{
+  "viewport": {
+    "width": 1280,
+    "height": 960
+  },
+  "documentWidth": 1265,
+  "bodyWidth": 1265,
+  "page": {
+    "x": 16,
+    "y": 39,
+    "width": 1233,
+    "height": 1707,
+    "right": 1249,
+    "bottom": 1746
+  },
+  "children": [
+    "header",
+    "kpis",
+    "analytics",
+    "inventory-attention",
+    "recent-imports"
+  ],
+  "cards": [
+    {
+      "x": 44,
+      "y": 348,
+      "width": 286,
+      "height": 110,
+      "right": 330,
+      "bottom": 458,
+      "label": "Net merchandise sales"
+    },
+    {
+      "x": 341,
+      "y": 348,
+      "width": 286,
+      "height": 110,
+      "right": 627,
+      "bottom": 458,
+      "label": "Orders"
+    },
+    {
+      "x": 638,
+      "y": 348,
+      "width": 286,
+      "height": 110,
+      "right": 924,
+      "bottom": 458,
+      "label": "Units sold"
+    },
+    {
+      "x": 935,
+      "y": 348,
+      "width": 286,
+      "height": 110,
+      "right": 1221,
+      "bottom": 458,
+      "label": "Low-stock SKUs"
+    }
+  ],
+  "analytics": {
+    "x": 44,
+    "y": 474,
+    "width": 1177,
+    "height": 480,
+    "right": 1221,
+    "bottom": 954
+  },
+  "sales": {
+    "x": 44,
+    "y": 474,
+    "width": 782,
+    "height": 480,
+    "right": 826,
+    "bottom": 954
+  },
+  "chart": {
+    "plot": {
+      "x": 128,
+      "y": 591,
+      "width": 679,
+      "height": 321,
+      "right": 807,
+      "bottom": 912
+    },
+    "ticks": [
+      "$600",
+      "$400",
+      "$200",
+      "$0"
+    ],
+    "lineCount": 1,
+    "areaCount": 1,
+    "points": 30,
+    "measure": "Net merchandise sales · USD sample currency · after discounts and returns, before tax"
+  },
+  "bestSellers": {
+    "x": 839,
+    "y": 474,
+    "width": 382,
+    "height": 480,
+    "right": 1221,
+    "bottom": 954
+  },
+  "attention": {
+    "x": 44,
+    "y": 970,
+    "width": 1177,
+    "height": 297,
+    "right": 1221,
+    "bottom": 1266
+  },
+  "recent": {
+    "x": 44,
+    "y": 1282,
+    "width": 1177,
+    "height": 427,
+    "right": 1221,
+    "bottom": 1710
+  },
+  "attentionRows": 3,
+  "attentionText": [
+    "Trail Insulated Bottle\nSage Green / 24 oz · SKU DEMO-BOTTLE-SGE\nLow stock\n3 available\n55 sold",
+    "Weekend Cotton Cap\nClay / One size · SKU DEMO-CAP-CLAY\nOut of stock\n0 available\n44 sold",
+    "Everyday Cotton Tee\nCream / Small · SKU DEMO-TEE-CRM-S\nLow stock\n4 available\n15 sold"
+  ],
+  "sampleBadge": "SAMPLE · USD",
+  "historyLink": {
+    "href": "/app/imports/history",
+    "label": "View live history →"
+  },
+  "giftCardRows": 0,
+  "importRows": 5,
+  "importStatuses": [
+    "Completed",
+    "Draft",
+    "Previewed",
+    "Mapping columns",
+    "Partially completed"
+  ],
+  "fixtureNotice": "SAMPLE DATA · Sales, inventory, products, and import statuses below are synthetic fixtures. No Shopify or import-history data is requested for this preview.",
+  "bodyBackground": "rgb(245, 247, 250)",
+  "panelBackground": "rgb(255, 255, 255)",
+  "textContrast": 13.677601862918877,
+  "statusContrasts": [
+    5.766909812839867,
+    6.88235376086374,
+    6.88235376086374,
+    6.88235376086374,
+    6.5848702721634
+  ]
+}

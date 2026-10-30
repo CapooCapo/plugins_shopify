@@ -21,6 +21,34 @@ async function isolatedPrisma(t) {
   try {
     sqlite.exec("PRAGMA foreign_keys = ON");
     for (const path of migrationPaths) sqlite.exec(await readFile(path, "utf8"));
+    // Keep this race test's disposable SQLite schema aligned with the
+    // PostgreSQL-only merge approval migration without touching prisma/dev.sqlite.
+    sqlite.exec(`
+      ALTER TABLE "ImportBatch" ADD COLUMN "originalCsv" TEXT;
+      ALTER TABLE "ImportBatch" ADD COLUMN "revision" INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE "ImportBatch" ADD COLUMN "activeMergeApprovalId" TEXT;
+      CREATE UNIQUE INDEX "ImportBatch_shop_id_key" ON "ImportBatch"("shop", "id");
+      CREATE TABLE "ImportMergeApproval" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "shop" TEXT NOT NULL,
+        "batchId" TEXT NOT NULL,
+        "mode" TEXT NOT NULL,
+        "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+        "snapshotJson" TEXT NOT NULL,
+        "fingerprint" TEXT NOT NULL,
+        "receiptRevision" INTEGER NOT NULL,
+        "chunkNumber" INTEGER NOT NULL DEFAULT 0,
+        "processedCount" INTEGER NOT NULL DEFAULT 0,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL,
+        CONSTRAINT "ImportMergeApproval_shop_batchId_fkey"
+          FOREIGN KEY ("shop", "batchId") REFERENCES "ImportBatch"("shop", "id")
+          ON DELETE CASCADE ON UPDATE CASCADE
+      );
+      CREATE UNIQUE INDEX "ImportMergeApproval_shop_id_key" ON "ImportMergeApproval"("shop", "id");
+      CREATE INDEX "ImportMergeApproval_shop_batchId_createdAt_idx" ON "ImportMergeApproval"("shop", "batchId", "createdAt");
+      CREATE INDEX "ImportMergeApproval_shop_status_updatedAt_idx" ON "ImportMergeApproval"("shop", "status", "updatedAt");
+    `);
   } finally {
     sqlite.close();
   }
@@ -39,7 +67,7 @@ function jsonResponse(data) {
   });
 }
 
-test("stale Merge worker cannot repeat product creation or inventory activation after another worker finishes", async (t) => {
+test("an expired lease during a Shopify lookup fails closed before product creation or inventory activation", async (t) => {
   const prisma = await isolatedPrisma(t);
   const t0 = new Date("2026-10-24T10:00:00.000Z");
   let currentTime = t0;
@@ -108,9 +136,8 @@ test("stale Merge worker cannot repeat product creation or inventory activation 
             signalWorkerAFirstSkuLookup();
             return workerAFirstSkuLookupResult;
           }
-          // Simulate Shopify's SKU search index lagging the product creation
-          // just committed by worker B, so the stale worker's second lookup
-          // cannot be relied on as a concurrency fence.
+          // Any later lookup would be unsafe if the stale worker were allowed
+          // to continue after the approval has been stopped.
           return jsonResponse({ productVariants: {
             edges: [], pageInfo: { hasNextPage: false, endCursor: null },
           } });
@@ -158,29 +185,37 @@ test("stale Merge worker cannot repeat product creation or inventory activation 
     },
   };
 
-  const workerA = mergeImportBatch({ shop, batchId, admin, prisma, now });
+  const workerA = mergeImportBatch({
+    shop, batchId, admin, prisma, now,
+    intent: "merge", expectedRevision: 0, confirmedLineIds: [lineId],
+  });
   await workerAFirstSkuLookupStarted;
 
   currentTime = new Date(t0.getTime() + 16 * 60 * 1000);
-  const workerB = await mergeImportBatch({ shop, batchId, admin, prisma, now });
-  assert.equal(workerB.status, "COMPLETED");
-  assert.equal((await prisma.importLine.findUniqueOrThrow({ where: { id: lineId } })).status, "SUCCEEDED");
-  assert.equal(createdProducts.length, 1);
-  assert.equal(activatedInventoryItems.length, 1);
+  const runningBatch = await prisma.importBatch.findUniqueOrThrow({ where: { id: batchId } });
+  await assert.rejects(
+    mergeImportBatch({
+      shop, batchId, admin, prisma, now,
+      intent: "continue", approvalId: runningBatch.activeMergeApprovalId,
+    }),
+    (error) => error.code === "RESUME_REQUIRED",
+  );
+  assert.equal(createdProducts.length, 0);
+  assert.equal(activatedInventoryItems.length, 0);
 
-  // Worker A's first lookup began before B's writes and returns that stale
-  // empty result only after B has completed and the lease has been stolen.
+  // Worker A's first lookup returns after the lease has expired. Its stale
+  // result cannot authorize a write after another request stopped approval.
   releaseWorkerAFirstSkuLookup(jsonResponse({ productVariants: {
     edges: [], pageInfo: { hasNextPage: false, endCursor: null },
   } }));
   await workerA;
 
-  assert.deepEqual(
-    [createdProducts.length, activatedInventoryItems.length],
-    [1, 1],
-    "a stale worker must not create a duplicate Shopify Draft or repeat inventory activation",
-  );
+  assert.deepEqual([createdProducts.length, activatedInventoryItems.length], [0, 0]);
   const finalLine = await prisma.importLine.findUniqueOrThrow({ where: { id: lineId } });
-  assert.equal(finalLine.status, "SUCCEEDED", "stale worker must not overwrite the completed line");
-  assert.equal(finalLine.stage, "COMPLETED");
+  assert.equal(finalLine.status, "PREVIEWED", "no mutation had begun while the Shopify lookup was pending");
+  assert.equal(finalLine.stage, "PREPARED");
+  const finalBatch = await prisma.importBatch.findUniqueOrThrow({ where: { id: batchId } });
+  assert.equal(finalBatch.status, "UNCERTAIN");
+  const approval = await prisma.importMergeApproval.findFirstOrThrow({ where: { batchId, shop } });
+  assert.equal(approval.status, "STOPPED");
 });

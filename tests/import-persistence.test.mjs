@@ -68,7 +68,7 @@ test("receipt code is visible after preview, in merge confirmation, and in histo
   assert.match(history, /function\s+receiptCodeLabel\s*\([^)]*\)\s*\{[\s\S]*?receiptCode\?\.trim\(\)\s*\|\|\s*["'`]No receipt code recorded \(legacy batch\)["'`]/);
   assert.match(detail, /stockhub-receipt-eyebrow">Import receipt<\/span><s-heading>\{batch\.receiptCode\}<\/s-heading>/,
     "the compact receipt header must display the saved receipt code");
-  assert.match(detail, /role="dialog" aria-label=\{`Confirm \$\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}`\}[\s\S]*?receipt \{batch\.receiptCode\}/,
+  assert.match(detail, /role="dialog" aria-label=\{`Confirm \$\{initialMergeIntent\}`\}[\s\S]*?receipt \{batch\.receiptCode\}/,
     "the explicit merge/resume dialog must identify the receipt before Shopify writes begin");
   assert.match(route, /return redirect\(`\/app\/imports\/history\/\$\{encodeURIComponent\(persisted\.batchId\)\}/,
     "a saved preview opens the receipt detail page that displays its generated code");
@@ -83,13 +83,12 @@ test("merge and resume submit the selected batch ID and do not create another re
     readFile(new URL("../app/routes/app.imports.history.$batchId.tsx", import.meta.url), "utf8"),
   ]);
   const mergeRoute = await readFile(mergeUrl, "utf8");
-  const mergeAction = route.slice(
-    route.indexOf('if (intent === "merge" || intent === "resume")'),
-    route.indexOf('if (intent !== "preview")'),
-  );
+  const mergeStart = route.indexOf('if (["merge", "resume", "continueMerge"');
+  const mergeAction = route.slice(mergeStart, route.indexOf('if (intent !== "preview")', mergeStart));
 
   assert.match(detail, /name="batchId"\s+value=\{batch\.id\}/);
-  assert.match(mergeAction, /await mergeImportBatch\(\{\s*shop:\s*session\.shop,\s*batchId,\s*admin,\s*prisma,\s*\}\)/);
+  assert.match(mergeAction, /await mergeImportBatch\(\{\s*shop:\s*session\.shop,\s*batchId,\s*admin,\s*prisma,\s*intent:\s*serviceIntent,\s*confirmedLineIds,\s*expectedRevision,\s*approvalId,\s*\}\)/,
+    "the selected receipt and persisted approval identity are sent to the chunked merge service");
   assert.doesNotMatch(mergeAction, /persistImportPreview/);
   assert.match(mergeRoute, /referenceDocumentUri:\s*`stockhub:\/\/receipt\/\$\{encodeURIComponent\(batch\.receiptCode\)\}\/line\//);
   assert.match(mergeRoute, /export async function mergeImportBatch\([\s\S]*?where:\s*\{\s*id:\s*batchId,\s*shop\s*\}/);
@@ -101,10 +100,11 @@ test("merge still requires explicit confirmation and checks store-derived permis
     readFile(new URL("../app/routes/app.imports.history.$batchId.tsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(route, /if\s*\(intent\s*===\s*"merge"\s*\|\|\s*intent\s*===\s*"resume"\)\s*\{[\s\S]*formData\.get\("confirmed"\)\s*!==\s*"yes"/);
+  assert.match(route, /const\s+initialConfirmation\s*=\s*mergeIntent\s*===\s*"merge"\s*\|\|\s*mergeIntent\s*===\s*"resume";\s*if\s*\(initialConfirmation\s*&&\s*formData\.get\("confirmed"\)\s*!==\s*"yes"\)/,
+    "only explicit initial Merge/Resume confirmation can start Shopify execution");
   assert.match(route, /where:\s*\{\s*id:\s*batchId,\s*shop:\s*session\.shop\s*\}/);
   assert.match(route, /const\s+neededScopes\s*=\s*new\s+Set\(\["read_products",\s*"read_inventory",\s*"read_locations",\s*"write_inventory"\]\)/);
   assert.match(route, /neededScopes\.add\("write_products"\)/);
-  assert.match(detail, /role="dialog" aria-label=\{`Confirm \$\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}`\}/);
+  assert.match(detail, /role="dialog" aria-label=\{`Confirm \$\{initialMergeIntent\}`\}/);
   assert.match(detail, /name="confirmed" value="yes"/);
 });

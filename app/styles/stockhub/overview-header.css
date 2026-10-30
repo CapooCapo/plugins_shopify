@@ -1,0 +1,193 @@
+.stockhub-overview {
+  width: min(100%, 1280px);
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+}
+
+.stockhub-overview-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.stockhub-overview-panel {
+  min-width: 0;
+  border: 1px solid var(--stockhub-border);
+  border-radius: 12px;
+  background: var(--stockhub-surface);
+  padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.stockhub-overview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  min-width: 0;
+}
+
+.stockhub-overview-heading {
+  min-width: 0;
+}
+
+.stockhub-overview-eyebrow {
+  margin-bottom: 2px;
+  color: var(--stockhub-brand-primary);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.stockhub-overview-heading h1 {
+  margin: 0;
+  color: var(--stockhub-ink);
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.stockhub-overview-heading p {
+  margin: 5px 0 0;
+  color: var(--stockhub-muted);
+  font-size: 14px;
+}
+
+.stockhub-overview-header-action {
+  padding-top: 20px;
+}
+
+.stockhub-overview-header-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  min-width: min(100%, 340px);
+  padding-top: 8px;
+}
+
+.stockhub-overview-range,
+.stockhub-chart-switch {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--stockhub-border);
+  border-radius: 8px;
+  background: var(--stockhub-surface);
+  padding: 3px;
+}
+
+.stockhub-overview-range a,
+.stockhub-chart-switch button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--stockhub-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 6px 10px;
+  text-decoration: none;
+}
+
+.stockhub-overview-range a[aria-current="page"],
+.stockhub-chart-switch button[aria-pressed="true"] {
+  background: #eaf1ff;
+  color: var(--stockhub-brand-primary);
+}
+
+.stockhub-overview-demo-toggle {
+  min-height: 36px;
+  border: 1px solid var(--stockhub-border);
+  border-radius: 8px;
+  background: var(--stockhub-surface);
+  color: var(--stockhub-brand-primary);
+  font-size: 13px;
+  font-weight: 650;
+  padding: 7px 10px;
+  text-decoration: none;
+}
+
+.stockhub-overview-demo-toggle:hover {
+  background: #f1f5ff;
+}
+
+.stockhub-chart-switch button:focus-visible,
+.stockhub-overview-range a:focus-visible,
+.stockhub-overview-demo-toggle:focus-visible,
+.stockhub-chart-bar-track:focus-visible {
+  outline: 3px solid var(--stockhub-brand-secondary);
+  outline-offset: 2px;
+}
+
+.stockhub-overview-refresh {
+  display: flex;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--stockhub-muted);
+  font-size: 12px;
+}
+
+.stockhub-overview-refresh a {
+  color: var(--stockhub-brand-primary);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.stockhub-overview-analytics {
+  gap: 22px;
+}
+
+.stockhub-overview-section-heading--analytics {
+  margin-bottom: 0;
+}
+
+.stockhub-overview-currency {
+  color: var(--stockhub-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.stockhub-overview-sales-metrics {
+  gap: 12px;
+}
+
+.stockhub-overview-metric--revenue { border-top: 3px solid var(--stockhub-brand-primary); }
+.stockhub-overview-metric--orders { border-top: 3px solid var(--stockhub-brand-secondary); }
+.stockhub-overview-metric--units { border-top: 3px solid #5e7c69; }
+.stockhub-overview-metric--low-stock { border-top: 3px solid #a76b12; }
+
+.stockhub-overview-trend-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 20px;
+}
+
+.stockhub-overview-ranking-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 20px;
+}
+
+.stockhub-overview-inventory-list-group + .stockhub-overview-inventory-list-group {
+  margin-top: 16px;
+}
+
+.stockhub-overview-inventory-list-group h3 {
+  margin: 14px 0 2px;
+  color: var(--stockhub-ink);
+  font-size: 13px;
+}
+
+.stockhub-overview-trend,
+.stockhub-overview-inventory,
+.stockhub-overview-ranking-grid > section {
+  min-width: 0;
+  padding: 20px 22px;
+}

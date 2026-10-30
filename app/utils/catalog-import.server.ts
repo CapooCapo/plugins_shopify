@@ -1,4 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import type { Prisma, PrismaClient } from "@prisma/client";
+import prisma from "../db.server";
 import { MAX_CSV_BYTES, MAX_CSV_ROWS } from "./csv-limits.js";
 import { CATALOG_FIELDS, type CatalogField } from "./catalog-import.shared";
 export { CATALOG_FIELDS } from "./catalog-import.shared";
@@ -87,6 +89,77 @@ export function normalizeCatalogRows(csv: ParsedCatalogCsv, mapping: CatalogMapp
 }
 
 export function checksumCatalogCsv(text: string) { return createHash("sha256").update(text, "utf8").digest("hex"); }
+
+export class CatalogSubmissionConflictError extends Error {
+  constructor() {
+    super("This upload form was already used for a different CSV. Reload Catalog Imports and submit the file again.");
+    this.name = "CatalogSubmissionConflictError";
+  }
+}
+
+function prismaCode(error: unknown): string | null {
+  return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+    ? error.code
+    : null;
+}
+
+/** Persist one upload per shop-scoped form token and prevent duplicate CSV drafts. */
+export async function persistCatalogUpload(input: {
+  shop: string;
+  submissionId: string;
+  fileName: string;
+  fileChecksum: string;
+  originalCsv: string;
+  sourceHeaders: string[];
+}, database: PrismaClient = prisma): Promise<{ batchId: string; duplicate: boolean }> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await database.$transaction(async (transaction) => {
+        const replay = await transaction.catalogImportBatch.findUnique({
+          where: { shop_submissionId: { shop: input.shop, submissionId: input.submissionId } },
+          select: { id: true, fileChecksum: true },
+        });
+        if (replay) {
+          if (replay.fileChecksum !== input.fileChecksum) throw new CatalogSubmissionConflictError();
+          return { batchId: replay.id, duplicate: false };
+        }
+
+        const existing = await transaction.catalogImportBatch.findFirst({
+          where: { shop: input.shop, fileChecksum: input.fileChecksum },
+          select: { id: true },
+        });
+        if (existing) return { batchId: existing.id, duplicate: true };
+
+        const batch = await transaction.catalogImportBatch.create({
+          data: {
+            id: randomUUID(),
+            shop: input.shop,
+            submissionId: input.submissionId,
+            fileName: input.fileName,
+            fileChecksum: input.fileChecksum,
+            originalCsv: input.originalCsv,
+            sourceHeaders: input.sourceHeaders,
+            status: "MAPPING",
+            draftVersion: 0,
+          },
+          select: { id: true },
+        });
+        return { batchId: batch.id, duplicate: false };
+      }, { isolationLevel: "Serializable" as Prisma.TransactionIsolationLevel });
+    } catch (error) {
+      if (prismaCode(error) === "P2034" && attempt < 2) continue;
+      if (prismaCode(error) !== "P2002") throw error;
+      const replay = await database.catalogImportBatch.findUnique({
+        where: { shop_submissionId: { shop: input.shop, submissionId: input.submissionId } },
+        select: { id: true, fileChecksum: true },
+      });
+      if (!replay) throw error;
+      if (replay.fileChecksum !== input.fileChecksum) throw new CatalogSubmissionConflictError();
+      return { batchId: replay.id, duplicate: false };
+    }
+  }
+  throw new Error("Could not persist the Catalog upload after retrying a concurrent transaction.");
+}
 
 export function validateCatalogUpload(name: string, text: string) {
   if (Buffer.byteLength(text, "utf8") > MAX_CSV_BYTES) throw new Error(`Catalog CSVs are limited to ${MAX_CSV_BYTES.toLocaleString()} bytes.`);

@@ -1,0 +1,17 @@
+[
+  {
+    "href": "/app/imports/history/fixture-inventory-1",
+    "text": "IMP-00214\nInventory import · North warehouse · 2026-10-29 12:00 UTC",
+    "status": "Completed"
+  },
+  {
+    "href": "/app/imports/history/fixture-inventory-2",
+    "text": "IMP-00213\nInventory import · East store · 2026-10-28 12:00 UTC",
+    "status": "Previewed"
+  },
+  {
+    "href": "/app/imports/catalog/fixture-catalog-1",
+    "text": "Autumn catalog.csv\nCatalog draft · 2026-10-29 12:00 UTC",
+    "status": "Catalog execution complete"
+  }
+]

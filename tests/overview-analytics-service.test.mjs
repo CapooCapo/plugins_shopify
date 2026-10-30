@@ -49,11 +49,11 @@ function orderNode({ id, lines = [], hasMoreLines = false, lineCursor = null, cr
   };
 }
 
-function salesLine({ id, currentQuantity, amount, productId = "gid://shopify/Product/1", variantId = "gid://shopify/ProductVariant/1" }) {
+function salesLine({ id, currentQuantity, amount, currencyCode = "USD", productId = "gid://shopify/Product/1", variantId = "gid://shopify/ProductVariant/1" }) {
   return {
     id,
     currentQuantity,
-    priceAfterAllDiscountsBeforeTaxesSet: { shopMoney: { amount: String(amount), currencyCode: "USD" } },
+    priceAfterAllDiscountsBeforeTaxesSet: { shopMoney: { amount: String(amount), currencyCode } },
     product: { id: productId, title: `Product ${productId.split("/").at(-1)}`, legacyResourceId: productId.split("/").at(-1) },
     variant: { id: variantId, title: "Default", sku: `SKU-${variantId.split("/").at(-1)}` },
   };
@@ -210,6 +210,82 @@ test("sales service paginates Orders and nested lineItems, excludes no-PII query
     "service output contains aggregates, not raw order or customer data");
 });
 
+test("non-USD sales fetch only public currency/date rates and USD stores skip FX lookup", async () => {
+  const originalFetch = globalThis.fetch;
+  const rateRequests = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = input instanceof Request ? new URL(input.url) : new URL(input.toString());
+    rateRequests.push({ url, init });
+    return response([{ date: "2026-10-28", base: "VND", quote: "USD", rate: 0.000038797 }]);
+  };
+
+  const makeSalesAdmin = ({ orderId, currencyCode, amount }) => {
+    const calls = [];
+    return {
+      calls,
+      admin: { graphql: async (query, { variables }) => {
+        calls.push({ query, variables });
+        assert.match(query, /StockHubOverviewOrders/);
+        return response({ data: { orders: connection([orderNode({
+          id: orderId,
+          createdAt: "2026-10-28T16:00:00.000Z",
+          lines: [salesLine({ id: `private-line-${orderId}`, currentQuantity: 2, amount, currencyCode })],
+        })]) } });
+      } },
+    };
+  };
+
+  try {
+    const vndAdmin = makeSalesAdmin({ orderId: "gid://shopify/Order/private-vnd-fixture", currencyCode: "VND", amount: 1_000_000 });
+    const vnd = await loadOverviewAnalytics(shopInput({
+      admin: vndAdmin.admin,
+      scopes: granted(salesScopes),
+      shop: `fx-vnd-${crypto.randomUUID()}.myshopify.com`,
+      timeZone: "Asia/Ho_Chi_Minh",
+      currencyCode: "VND",
+      now: () => new Date("2026-10-28T12:00:00.000Z"),
+    }));
+
+    assert.equal(vnd.sales.status, "ready");
+    assert.equal(vnd.currencyCode, "VND", "shop metadata keeps its original source currency");
+    assert.equal(vnd.sales.data.currencyCode, "USD", "live sales aggregates expose their converted display currency");
+    assert.deepEqual(vnd.sales.data.totals, { revenue: 38.797, orders: 1, units: 2 });
+    assert.equal(vndAdmin.calls.length, 1, "the Shopify read is limited to the bounded Orders query");
+    assert.doesNotMatch(vndAdmin.calls[0].query, /customer|email|phone|address/i);
+    assert.doesNotMatch(JSON.stringify(vnd.sales.data), /private-vnd-fixture|private-line|customer|email|phone/i,
+      "returned analytics contain aggregates, not raw order or customer identifiers");
+
+    assert.equal(rateRequests.length, 1, "a non-USD live store with revenue requests reference rates once");
+    const { url, init } = rateRequests[0];
+    assert.equal(url.origin, "https://api.frankfurter.dev");
+    assert.equal(url.pathname, "/v2/rates");
+    assert.deepEqual([...url.searchParams.keys()].sort(), ["base", "from", "quotes", "to"],
+      "the public rate request contains only a currency pair and date bounds");
+    assert.equal(url.searchParams.get("base"), "VND");
+    assert.equal(url.searchParams.get("quotes"), "USD");
+    assert.match(url.searchParams.get("from"), /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(url.searchParams.get("to"), "2026-10-28");
+    assert.deepEqual(init.headers, { accept: "application/json" });
+    assert.doesNotMatch(url.href, /myshopify|Order|private|email|customer/i,
+      "no shop, order, or customer data is sent to the public reference-rate service");
+
+    const usdAdmin = makeSalesAdmin({ orderId: "gid://shopify/Order/private-usd-fixture", currencyCode: "USD", amount: 24 });
+    const usd = await loadOverviewAnalytics(shopInput({
+      admin: usdAdmin.admin,
+      scopes: granted(salesScopes),
+      shop: `fx-usd-${crypto.randomUUID()}.myshopify.com`,
+      currencyCode: "USD",
+    }));
+    assert.equal(usd.sales.status, "ready");
+    assert.equal(usd.sales.data.currencyCode, "USD");
+    assert.deepEqual(usd.sales.data.totals, { revenue: 24, orders: 1, units: 2 });
+    assert.equal(usdAdmin.calls.length, 1);
+    assert.equal(rateRequests.length, 1, "USD-native sales do not make an unnecessary external rate request");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("sales service retries throttling a bounded number of times and recovers", async () => {
   let calls = 0;
   const admin = { graphql: async () => {
@@ -264,6 +340,41 @@ test("sales service marks later-page API failure partial and exhausted initial t
   });
 });
 
+test("sales service marks the 1,000-order pagination cap partial and preserves fetched totals", async () => {
+  let calls = 0;
+  const admin = { graphql: async (_query, { variables }) => {
+    const pageIndex = calls;
+    calls += 1;
+    assert.equal(variables.first, 25);
+    assert.equal(variables.after, pageIndex === 0 ? null : `orders-${pageIndex - 1}`);
+    const orders = Array.from({ length: 25 }, (_, rowIndex) => {
+      const orderIndex = pageIndex * 25 + rowIndex;
+      return orderNode({
+        id: `gid://shopify/Order/cap-${orderIndex}`,
+        lines: [salesLine({
+          id: `line-cap-${orderIndex}`,
+          currentQuantity: 1,
+          amount: 5,
+          productId: "gid://shopify/Product/cap",
+          variantId: "gid://shopify/ProductVariant/cap",
+        })],
+      });
+    });
+    return response({ data: { orders: connection(orders, {
+      hasNextPage: true,
+      endCursor: `orders-${pageIndex}`,
+    }) } });
+  } };
+
+  const result = await loadOverviewAnalytics(shopInput({ scopes: granted(salesScopes), admin }));
+
+  assert.equal(calls, 40, "the bounded Orders reader requests at most 40 pages of 25");
+  assert.equal(result.sales.status, "partial", "a final hasNextPage at the configured cap must never appear complete");
+  assert.match(result.sales.message, /partial|fully read/i);
+  assert.deepEqual(result.sales.data.totals, { revenue: 5000, orders: 1000, units: 1000 },
+    "aggregates reflect every fetched row without inventing totals for the unread continuation");
+});
+
 test("inventory service paginates variants and active inventory levels while retaining unknown as unknown", async () => {
   const calls = [];
   const activeLevel = (id, quantity, isActive = true) => ({
@@ -310,4 +421,53 @@ test("inventory service paginates variants and active inventory levels while ret
   assert.equal(calls[1].variables.id, "item-v-low-a");
   assert.equal(calls[1].variables.after, "level-cursor");
   assert.equal(calls[2].variables.after, "variant-cursor");
+});
+
+test("inventory service marks the 1,000-variant pagination cap partial and preserves known availability", async () => {
+  let calls = 0;
+  const admin = { graphql: async (_query, { variables }) => {
+    const pageIndex = calls;
+    calls += 1;
+    assert.equal(variables.first, 20);
+    assert.equal(variables.after, pageIndex === 0 ? null : `variants-${pageIndex - 1}`);
+    const variants = Array.from({ length: 20 }, (_, rowIndex) => {
+      const variantIndex = pageIndex * 20 + rowIndex;
+      return {
+        id: `gid://shopify/ProductVariant/cap-${variantIndex}`,
+        title: `Variant ${variantIndex}`,
+        sku: `SKU-CAP-${variantIndex}`,
+        product: {
+          id: `gid://shopify/Product/cap-${variantIndex}`,
+          title: `Product ${variantIndex}`,
+          legacyResourceId: String(variantIndex),
+          featuredImage: null,
+        },
+        inventoryItem: {
+          id: `inventory-item-${variantIndex}`,
+          tracked: true,
+          inventoryLevels: connection([{
+            isActive: true,
+            location: { id: "location-1", isActive: true },
+            quantities: [{ name: "available", quantity: 2 }],
+          }]),
+        },
+      };
+    });
+    return response({ data: { productVariants: connection(variants, {
+      hasNextPage: true,
+      endCursor: `variants-${pageIndex}`,
+    }) } });
+  } };
+
+  const result = await loadOverviewAnalytics(shopInput({ scopes: granted(inventoryScopes), admin }));
+
+  assert.equal(calls, 50, "the bounded variant reader requests at most 50 pages of 20");
+  assert.equal(result.inventory.status, "partial", "a final hasNextPage at the configured cap must never appear complete");
+  assert.match(result.inventory.message, /partial|could not be fully read/i);
+  assert.equal(result.inventory.data.totalTrackedKnown, 2000,
+    "known stock from all fetched variants remains visible even though later variants were not read");
+  assert.equal(result.inventory.data.lowStockSkuCount, 1000);
+  assert.equal(result.inventory.data.outOfStockSkuCount, 0);
+  assert.equal(result.inventory.data.unknownCount, 0,
+    "partial status is due to the pagination cap, not fabricated missing inventory for fetched variants");
 });

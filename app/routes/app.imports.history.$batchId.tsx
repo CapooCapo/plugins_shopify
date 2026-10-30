@@ -1,5 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Form, useActionData, useLoaderData, useNavigation } from "react-router";
+import { Form, useActionData, useFetcher, useLoaderData, useNavigation } from "react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { RoutePending } from "../components/RoutePending";
@@ -18,6 +18,24 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     include: { lines: { orderBy: { rowNumber: "asc" } } },
   });
   if (!batch) throw new Response("Import receipt not found", { status: 404 });
+  // The original upload is retained for server-side audit/recovery, not needed by
+  // the rendered receipt page. Avoid sending a potentially 1 MB source file to
+  // the browser on every navigation/revalidation.
+  const { originalCsv: _originalCsv, ...pageBatch } = batch;
+  void _originalCsv;
+  const mergeApproval = batch.activeMergeApprovalId
+    ? await prisma.importMergeApproval.findFirst({
+        where: { id: batch.activeMergeApprovalId, shop: session.shop, batchId: batch.id },
+        select: { id: true, mode: true, status: true, chunkNumber: true, processedCount: true, snapshotJson: true },
+      })
+    : null;
+  let approvedLineCount = 0;
+  if (mergeApproval) {
+    try {
+      const snapshot = JSON.parse(mergeApproval.snapshotJson) as { lines?: unknown[] };
+      approvedLineCount = Array.isArray(snapshot.lines) ? snapshot.lines.length : 0;
+    } catch { /* The action fails closed and the UI will offer only a refresh/review path. */ }
+  }
   let grantedScopes: string[] = [];
   let scopesVerified = false;
   try {
@@ -30,7 +48,15 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const missingWriteScopes = scopesVerified
     ? missingScopesForGrant(grantedScopes, ["write_inventory", "write_products"])
     : ["write_inventory", "write_products"];
-  return { batch, scopesVerified, missingReadScopes, missingWriteScopes, shop: session.shop, historyHref: `/app/imports/history${url.search}`, draftNotice: url.searchParams.get("draft") };
+  const mergeApprovalForPage = mergeApproval ? {
+    id: mergeApproval.id,
+    mode: mergeApproval.mode,
+    status: mergeApproval.status,
+    chunkNumber: mergeApproval.chunkNumber,
+    processedCount: mergeApproval.processedCount,
+    approvedLineCount,
+  } : null;
+  return { batch: pageBatch, mergeApproval: mergeApprovalForPage, scopesVerified, missingReadScopes, missingWriteScopes, shop: session.shop, historyHref: `/app/imports/history${url.search}`, draftNotice: url.searchParams.get("draft") };
 };
 
 function stageLabel(stage: string, status: string, errorCode: string | null) {
@@ -220,12 +246,22 @@ export function noEligibleReceiptMessage(summary: Pick<ReturnType<typeof summari
 }
 
 export default function ImportBatchDetail() {
-const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHref, draftNotice, shop } = useLoaderData<typeof loader>();
+const { batch, mergeApproval, scopesVerified, missingReadScopes, missingWriteScopes, historyHref, draftNotice, shop } = useLoaderData<typeof loader>();
   const actionData = useActionData() as {
     error?: string;
     authorizationError?: string;
     verification?: { verifiedAt: string; counts: { SAFE_CANDIDATE: number; BLOCKED: number; UNCERTAIN: number }; rows: Array<{ rowNumber: number; sku: string; classification: string; reasons: string[] }>; copyText: string };
   } | undefined;
+  const mergeFetcher = useFetcher<{
+    error?: string;
+    mergeProgress?: { batchId: string; approvalId: string | null; approvalStatus: string | null; chunkNumber: number; continueRequired: boolean; status: string };
+  }>();
+  const pauseFetcher = useFetcher<{
+    error?: string;
+    mergeProgress?: { batchId: string; approvalId: string | null; approvalStatus: string | null; chunkNumber: number; continueRequired: boolean; status: string; paused?: boolean };
+  }>();
+  const autoPausedRef = useRef(false);
+  const lastAutoChunkRef = useRef("");
   const [verificationFilter, setVerificationFilter] = useState("ALL");
   const [lineSearch, setLineSearch] = useState("");
   const [lineStatusFilter, setLineStatusFilter] = useState("ALL");
@@ -248,6 +284,16 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
   const conflictRef = useRef<HTMLDivElement>(null);
   const draftSaveInFlightRef = useRef(false);
   const navigation = useNavigation();
+  useEffect(() => {
+    const progress = mergeFetcher.data?.mergeProgress;
+    if (mergeFetcher.state !== "idle" || !progress?.continueRequired || progress.approvalStatus !== "ACTIVE" || !progress.approvalId || autoPausedRef.current) return;
+    const key = `${progress.approvalId}:${progress.chunkNumber}`;
+    if (lastAutoChunkRef.current === key) return;
+    lastAutoChunkRef.current = key;
+    mergeFetcher.submit({ intent: "continueMerge", batchId: batch.id, approvalId: progress.approvalId }, { method: "post" });
+  // useFetcher.submit is stable; depending on its data/state fields avoids effect churn on the fetcher wrapper.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batch.id, mergeFetcher.data, mergeFetcher.state, mergeFetcher.submit]);
   const selectedLine = batch.lines.find((line) => line.id === selectedLineId) ?? null;
   const revalidationLine = batch.lines.find((line) => line.id === revalidationLineId) ?? null;
   const draftEditable = batch.status === "PREVIEWED" && batch.lines.every((line) => line.stage === "PREPARED" && ["PREVIEWED", "BLOCKED"].includes(line.status));
@@ -355,11 +401,17 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
   const hasMergeable = batch.lines.some((line) =>
     !["SUCCEEDED", "BLOCKED"].includes(line.status) && line.operationType !== "BLOCKED",
   );
+  const hasResumeOnlyWork = batch.lines.some((line) =>
+    ["FAILED", "UNCERTAIN", "RUNNING"].includes(line.status) && line.operationType !== "BLOCKED",
+  );
+  const initialMergeIntent = hasResumeOnlyWork ? "resume" : "merge";
+  const initialMergeLabel = initialMergeIntent === "resume" ? "Resume" : "Merge";
+  const approvalNeedsContinuation = Boolean(mergeApproval && ["ACTIVE", "PAUSED"].includes(mergeApproval.status));
   const missingRequiredWriteScopes = [
     ...(missingWriteScopes.includes("write_inventory") ? ["write_inventory"] : []),
     ...(productWriteRequired && missingWriteScopes.includes("write_products") ? ["write_products"] : []),
   ];
-  const mergeDisabled = !scopesVerified || missingReadScopes.length > 0 || missingWriteScopes.includes("write_inventory") || (productWriteRequired && missingWriteScopes.includes("write_products")) || !hasMergeable;
+  const mergeDisabled = !scopesVerified || missingReadScopes.length > 0 || missingWriteScopes.includes("write_inventory") || (productWriteRequired && missingWriteScopes.includes("write_products")) || !hasMergeable || approvalNeedsContinuation;
   const mergeDisabledReason = !hasMergeable ? null : !scopesVerified
     ? "Shopify permissions could not be verified. Refresh this page and reauthorize StockHub if the issue continues."
     : missingReadScopes.length > 0 || missingRequiredWriteScopes.length > 0
@@ -603,11 +655,44 @@ const { batch, scopesVerified, missingReadScopes, missingWriteScopes, historyHre
             </div>
             {errorGroupFilter ? <div className="stockhub-line-toolbar__active-filter" role="status"><span>Showing one validation issue group</span><button type="button" className="stockhub-text-action" onClick={() => { setErrorGroupFilter(null); setLineStatusFilter("ALL"); setLinePage(0); }}>Clear filter</button></div> : null}
           </div>
-          {eligibleCount > 0 || draftEditable ? <div className="stockhub-merge-action stockhub-merge-bar">
-            <div className="stockhub-merge-bar__summary"><strong>{eligibleCount} eligible row{eligibleCount === 1 ? "" : "s"}</strong>{blocked > 0 ? <span>{blocked} excluded as blocked</span> : null}<small>Only eligible rows are included after explicit confirmation.</small></div>
+          {mergeApproval ? <div className="stockhub-merge-action stockhub-merge-bar" role="region" aria-label="Inventory merge progress">
+            <div className="stockhub-merge-bar__summary">
+              <strong>Saved Merge approval · {mergeApproval.status.toLowerCase()}</strong>
+              <span>Chunk {mergeApproval.chunkNumber} · {mergeApproval.processedCount} of {mergeApproval.approvedLineCount} approved rows checkpointed</span>
+              <small>Each request handles at most 50 rows. Completed Shopify changes cannot be rolled back.</small>
+            </div>
+            {mergeApproval.status === "ACTIVE" ? <>
+              <mergeFetcher.Form method="post" onSubmit={() => { autoPausedRef.current = false; }}>
+                <input type="hidden" name="intent" value="continueMerge"/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="approvalId" value={mergeApproval.id}/>
+                <s-button type="submit" disabled={mergeFetcher.state !== "idle" || pauseFetcher.state !== "idle"}>Continue approved Merge</s-button>
+              </mergeFetcher.Form>
+              <pauseFetcher.Form method="post" onSubmit={() => { autoPausedRef.current = true; }}>
+                <input type="hidden" name="intent" value="pauseMerge"/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="approvalId" value={mergeApproval.id}/>
+                <s-button type="submit" disabled={pauseFetcher.state !== "idle"}>Pause automatic continuation</s-button>
+              </pauseFetcher.Form>
+              <small>Pause takes effect at the next chunk boundary; an in-flight chunk may finish.</small>
+            </> : mergeApproval.status === "PAUSED" ? <mergeFetcher.Form method="post" onSubmit={() => { autoPausedRef.current = false; }}>
+              <input type="hidden" name="intent" value="resumeApprovedMerge"/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="approvalId" value={mergeApproval.id}/>
+              <s-button type="submit" variant="primary" disabled={mergeFetcher.state !== "idle"}>Continue saved approval</s-button>
+            </mergeFetcher.Form> : null}
+            {mergeFetcher.data?.error || pauseFetcher.data?.error ? <div role="alert"><s-banner tone="critical">{mergeFetcher.data?.error ?? pauseFetcher.data?.error}</s-banner></div> : null}
+            {mergeFetcher.data?.mergeProgress ? <p role="status">Chunk {mergeFetcher.data.mergeProgress.chunkNumber} finished with receipt status {mergeFetcher.data.mergeProgress.status.toLowerCase()}.</p> : null}
+            {pauseFetcher.data?.mergeProgress?.paused ? <p role="status">Automatic continuation paused. Existing Shopify changes remain in place.</p> : null}
+          </div> : null}
+          {(eligibleCount > 0 || draftEditable) && !approvalNeedsContinuation ? <div className="stockhub-merge-action stockhub-merge-bar">
+            <div className="stockhub-merge-bar__summary"><strong>{eligibleCount} eligible row{eligibleCount === 1 ? "" : "s"}</strong>{blocked > 0 ? <span>{blocked} excluded as blocked</span> : null}<small>One explicit confirmation authorizes the current server-side row snapshot.</small></div>
             {draftEditable && !revalidationLine ? <span className="stockhub-merge-bar__hint">Select a draft row above to revalidate it.</span> : null}
-            {eligibleCount > 0 && !mergeConfirming ? <s-button type="button" variant="primary" disabled={mergeDisabled} onClick={() => setMergeConfirmationRevision(mergeEligibilityRevision)}>{batch.status === "PREVIEWED" ? "Merge" : "Resume"} eligible lines</s-button> : null}
-            {mergeConfirming ? <div className="stockhub-merge-confirmation" role="dialog" aria-label={`Confirm ${batch.status === "PREVIEWED" ? "merge" : "resume"}`}><s-paragraph>Confirm {batch.status === "PREVIEWED" ? "merge" : "resume"} of {eligibleCount} eligible row(s) for receipt {batch.receiptCode}. Shopify writes start only after this confirmation.{blocked > 0 ? ` ${blocked} blocked row(s) will remain attached to this receipt.` : ""}</s-paragraph><Form method="post"><input type="hidden" name="intent" value={batch.status === "PREVIEWED" ? "merge" : "resume"}/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="confirmed" value="yes"/><input type="hidden" name="confirmedCount" value={eligibleCount}/>{blocked > 0 ? <input type="hidden" name="partialConfirmed" value="yes"/> : null}<s-button type="submit" variant="primary">Confirm {batch.status === "PREVIEWED" ? "merge" : "resume"} of {eligibleCount} rows</s-button><s-button type="button" onClick={() => setMergeConfirmationRevision(null)}>Cancel</s-button></Form></div> : null}
+            {eligibleCount > 0 && !mergeConfirming ? <s-button type="button" variant="primary" disabled={mergeDisabled} onClick={() => setMergeConfirmationRevision(mergeEligibilityRevision)}>{initialMergeLabel} eligible lines</s-button> : null}
+            {mergeConfirming ? <div className="stockhub-merge-confirmation" role="dialog" aria-label={`Confirm ${initialMergeIntent}`}>
+              <s-paragraph>Confirm {initialMergeIntent} of {eligibleCount} eligible row(s) for receipt {batch.receiptCode}. One confirmation advances safe work in server-bounded chunks of up to 50 rows.{blocked > 0 ? ` ${blocked} blocked row(s) will remain attached to this receipt.` : ""}</s-paragraph>
+              <mergeFetcher.Form method="post" onSubmit={() => { autoPausedRef.current = false; lastAutoChunkRef.current = ""; setMergeConfirmationRevision(null); }}>
+                <input type="hidden" name="intent" value={initialMergeIntent}/><input type="hidden" name="batchId" value={batch.id}/><input type="hidden" name="confirmed" value="yes"/><input type="hidden" name="confirmedCount" value={eligibleCount}/><input type="hidden" name="expectedRevision" value={batch.revision}/>
+                {blocked > 0 ? <input type="hidden" name="partialConfirmed" value="yes"/> : null}
+                <s-button type="submit" variant="primary" disabled={mergeDisabled || mergeFetcher.state !== "idle"}>Confirm {initialMergeLabel.toLowerCase()} of {eligibleCount} rows</s-button>
+                <s-button type="button" onClick={() => setMergeConfirmationRevision(null)}>Cancel</s-button>
+              </mergeFetcher.Form>
+            </div> : null}
+            {mergeFetcher.data?.error && !mergeApproval ? <div role="alert"><s-banner tone="critical">{mergeFetcher.data.error}</s-banner></div> : null}
           </div> : null}
           <p className="stockhub-line-results" aria-live="polite">{filteredLines.length} row{filteredLines.length === 1 ? "" : "s"} · Page {Math.min(linePage + 1, linePageCount)} of {linePageCount}</p>
           <div className="stockhub-lines-table-wrap">

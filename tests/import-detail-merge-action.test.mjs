@@ -45,11 +45,11 @@ test("PREVIEWED eligible receipt exposes a primary Merge action below line-item 
     "the read-only verification action must remain a POST form");
   assert.ok(source.indexOf("label=\"Search line items\"") < mergeActionStart && mergeActionStart < lineResultsStart,
     "Merge/Resume must appear immediately below the line-item filters and before the results/table");
-  assert.match(source, /eligibleCount > 0 \|\| draftEditable \? <div className="stockhub-merge-action stockhub-merge-bar">/,
+  assert.match(source, /\(eligibleCount > 0 \|\| draftEditable\) && !approvalNeedsContinuation \? <div className="stockhub-merge-action stockhub-merge-bar">/,
     "the terminal state omits the sticky merge bar while draft editing can still expose revalidation");
   assert.match(source, /eligibleCount > 0 && !mergeConfirming \? <s-button type="button" variant="primary" disabled=\{mergeDisabled\} onClick=\{\(\) => setMergeConfirmationRevision\(mergeEligibilityRevision\)\}/,
     "an eligible receipt opens confirmation against the current row-state revision");
-  assert.match(mergeAction, /mergeConfirming \? <div className="stockhub-merge-confirmation" role="dialog" aria-label=\{`Confirm \$\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}`\}[\s\S]*?<Form method="post">[\s\S]*?name="intent" value=\{batch\.status === "PREVIEWED" \? "merge" : "resume"\}[\s\S]*?name="confirmed" value="yes"[\s\S]*?name="confirmedCount" value=\{eligibleCount\}[\s\S]*?Confirm \{batch\.status === "PREVIEWED" \? "merge" : "resume"\} of \{eligibleCount\} rows[\s\S]*?<\/Form>/,
+  assert.match(mergeAction, /mergeConfirming \? <div className="stockhub-merge-confirmation" role="dialog" aria-label=\{`Confirm \$\{initialMergeIntent\}`\}[\s\S]*?<mergeFetcher\.Form method="post"[\s\S]*?name="intent" value=\{initialMergeIntent\}[\s\S]*?name="confirmed" value="yes"[\s\S]*?name="confirmedCount" value=\{eligibleCount\}[\s\S]*?Confirm \{initialMergeLabel\.toLowerCase\(\)\} of \{eligibleCount\} rows[\s\S]*?<\/mergeFetcher\.Form>/,
     "Merge/Resume must retain an explicit confirmation dialog and original POST fields");
   assert.match(mergeAction, /name="confirmedCount"/);
   assert.match(source, /const mergeConfirming = eligibleCount > 0 && mergeConfirmationRevision === mergeEligibilityRevision/,
@@ -58,16 +58,16 @@ test("PREVIEWED eligible receipt exposes a primary Merge action below line-item 
 });
 
 test("draft CRUD is tenant/state/version guarded, revalidates rows, and never calls Shopify writes", async () => {
-  const [route, detail, merge] = await Promise.all([
+  const [route, detail] = await Promise.all([
     readFile(new URL("../app/routes/app.imports._index.tsx", import.meta.url), "utf8"),
     readFile(detailRoute, "utf8"),
-    readFile(new URL("../app/utils/import-merge.server.ts", import.meta.url), "utf8"),
   ]);
   const crud = route.slice(route.indexOf('if (intent === "draftAddLine"'), route.indexOf('if (intent === "verifyShopifyState")'));
   assert.match(crud, /where: \{ id: batchId, shop: session\.shop \}/);
   assert.match(crud, /batch\.status !== "PREVIEWED"/);
   assert.match(crud, /batch\.updatedAt\.getTime\(\) !== expectedUpdatedAt\.getTime\(\)/);
-  assert.match(crud, /updateMany\(\{ where: \{ id: batch\.id, shop: session\.shop, status: "PREVIEWED", updatedAt: expectedUpdatedAt \}/);
+  assert.match(crud, /updateMany\(\{ where: \{ id: batch\.id, shop: session\.shop, status: "PREVIEWED", revision: batch\.revision, updatedAt: expectedUpdatedAt \}, data: \{ revision: \{ increment: 1 \}/,
+    "draft writes use a tenant-scoped optimistic revision CAS and advance the revision atomically");
   assert.match(crud, /prepareDraftLine\(admin, candidate\.row, batch\.locationId\)/);
   assert.doesNotMatch(crud, /inventoryAdjustQuantities|productCreate|inventoryActivate/);
   assert.match(detail, /draftAddLine/);
@@ -75,5 +75,6 @@ test("draft CRUD is tenant/state/version guarded, revalidates rows, and never ca
   assert.match(detail, /draftDeleteLine/);
   assert.match(detail, /Prepare product draft in Product Catalog[\s\S]*?does not create a Shopify product/,
     "the missing-SKU path remains a local catalog draft flow and cannot create a Shopify product");
-  assert.match(merge, /Explicitly confirmed partial imports may contain validation-blocked rows/);
+  assert.match(route, /excludedLines\.length > 0 && formData\.get\("partialConfirmed"\) !== "yes"/,
+    "partial imports still require explicit server-side confirmation of excluded rows");
 });

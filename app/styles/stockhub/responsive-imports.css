@@ -1,0 +1,157 @@
+
+@media (min-width: 601px) and (max-width: 900px) {
+  .stockhub-page {
+    padding-inline: 16px;
+  }
+
+  .stockhub-overview,
+  .stockhub-store-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stockhub-overview-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .stockhub-products-filter-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stockhub-products-filter-form > s-text-field {
+    grid-column: 1 / -1;
+  }
+
+  .stockhub-products-filter-form > s-button {
+    justify-self: start;
+  }
+
+  .stockhub-products-table,
+  .stockhub-products-table tbody,
+  .stockhub-products-table tr,
+  .stockhub-products-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .stockhub-products-table-wrap { overflow: visible; }
+  .stockhub-products-table { min-width: 0; }
+
+  .stockhub-products-table thead {
+    display: none;
+  }
+
+  .stockhub-products-table tr.stockhub-product-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 16px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--stockhub-border);
+  }
+
+  .stockhub-product-row td,
+  .stockhub-product-row:not(:last-child) td {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .stockhub-product-row td:first-child,
+  .stockhub-product-row td:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .stockhub-product-row td:not(:first-child)::before {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--stockhub-muted);
+    content: attr(data-label);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .stockhub-product-row td:last-child::before {
+    display: none;
+  }
+
+  .stockhub-product-actions {
+    gap: 12px 20px;
+  }
+
+  .stockhub-product-actions :where(button, a) {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .stockhub-product-identity-text strong {
+    display: -webkit-box;
+    max-height: 2.6em;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+  }
+
+  .stockhub-product-detail-row {
+    display: block;
+  }
+
+  .stockhub-product-detail-row td {
+    padding: 0 20px 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  .stockhub-products {
+    gap: 20px;
+  }
+
+  .stockhub-products-header h1 {
+    font-size: 26px;
+  }
+
+  .stockhub-products-count {
+    margin-top: 0;
+  }
+
+  .stockhub-products-filters,
+  .stockhub-products-results-heading {
+    padding: 14px 16px;
+  }
+
+  .stockhub-products-filter-form {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .stockhub-products-filter-form > s-text-field {
+    grid-column: auto;
+  }
+
+  .stockhub-products-table tr.stockhub-product-row {
+    gap: 6px 14px;
+    padding: 10px 16px;
+  }
+
+  .stockhub-products-table tr.stockhub-product-row td:not(:first-child)::before {
+    margin-bottom: 1px;
+  }
+
+  .stockhub-product-detail-row td {
+    padding: 0 16px 14px;
+  }
+
+  .stockhub-product-variant-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stockhub-app-frame :where(div, nav, main, form, input, select, textarea, details, summary, a, button) {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

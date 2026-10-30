@@ -42,17 +42,41 @@ model ImportBatch {
   currencyCode String
   status       String       @default("PREVIEWED")
   actor        String?
+  originalCsv  String?      @db.Text
+  revision     Int          @default(0)
+  activeMergeApprovalId String?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   completedAt  DateTime?
   lines        ImportLine[]
   activityLogs ActivityLog[]
+  mergeApprovals ImportMergeApproval[]
 
   @@unique([shop, submissionId])
   @@unique([shop, receiptCode])
   @@unique([shop, id])
   @@index([shop, createdAt])
   @@index([status])
+}
+
+model ImportMergeApproval {
+  id              String      @id
+  shop            String
+  batchId         String
+  mode            String
+  status          String      @default("ACTIVE")
+  snapshotJson    String      @db.Text
+  fingerprint     String
+  receiptRevision Int
+  chunkNumber     Int         @default(0)
+  processedCount  Int         @default(0)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  batch           ImportBatch @relation(fields: [shop, batchId], references: [shop, id], onDelete: Cascade)
+
+  @@unique([shop, id])
+  @@index([shop, batchId, createdAt])
+  @@index([shop, status, updatedAt])
 }
 
 model ActivityLog {
@@ -352,6 +376,7 @@ model CatalogImportBatch {
   @@unique([shop, submissionId])
   @@index([shop, createdAt])
   @@index([shop, status, updatedAt])
+  @@index([shop, fileChecksum])
 }
 
 model CatalogImportLine {

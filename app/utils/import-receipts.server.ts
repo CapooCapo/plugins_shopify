@@ -10,6 +10,7 @@ export type PersistImportPreviewInput = {
   auditActor?: ActivityActor;
   fileName: string;
   checksum: string;
+  originalCsv: string;
   location: { id: string; name: string };
   currencyCode: string;
   lines: Prisma.ImportLineCreateWithoutBatchInput[];
@@ -152,6 +153,7 @@ export async function persistImportPreview(
           receiptCode,
           fileChecksum: input.checksum,
           fileName: input.fileName,
+          originalCsv: input.originalCsv,
           locationId: input.location.id,
           locationName: input.location.name,
           currencyCode: input.currencyCode,

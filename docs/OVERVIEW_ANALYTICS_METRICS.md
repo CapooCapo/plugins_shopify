@@ -35,13 +35,16 @@ This document defines the read-only sales and inventory metrics shown on StockHu
 - **Low stock** is a unique, nonempty SKU whose combined known available quantity across all variants sharing that SKU is greater than zero and less than or equal to **5**.
 - **Out of stock** is a unique, nonempty SKU whose combined known available quantity across all variants sharing that SKU is **0 or below**.
 - If any variant sharing a SKU is unknown, untracked, or incompletely read, the SKU is left unclassified rather than being classified from only the known variants. Variants without an SKU can appear in variant-level detail but do not contribute to the SKU counts.
-- Unknown and untracked counts are variant counts, not SKU counts. In partial responses, low/out-of-stock totals are presented as “at least” because unreturned variants may change them.
+- Unknown and untracked counts are variant counts, not SKU counts. In partial responses, low/out-of-stock SKU counts describe only the variants loaded so far. Additional pages can contain other variants with the same SKU, changing that SKU's combined availability and its low/out-of-stock classification; these observed counts are not guaranteed lower bounds.
 
 ## Empty, partial and unavailable states
 
 - A successful read with no eligible orders is a verified zero for orders and units; the chart explains that there were no non-cancelled, non-test orders in the selected period.
 - Missing scopes produce `permission_required`; a failed live-scope query produces `unverified` and prevents analytics API calls.
 - A first-page Shopify error produces `unavailable`. If one or more pages were read before a later API error or safety cap, the available aggregates are `partial`, with an explanation; partial results are never cached as successful data.
+- Reads are bounded to three total attempts. For Shopify throttle responses, the reader uses the GraphQL cost extension (`requestedQueryCost`, `currentlyAvailable`, `restoreRate`) or an HTTP `Retry-After` header when available. It waits only when the computed delay is at most five seconds; otherwise it stops retrying and reports unavailable/partial data according to whether any earlier pages completed. If throttle metadata is absent, it uses bounded 300 ms then 600 ms delays. Network failures use the same bounded fallback schedule.
+- Each analytics load also has a shared budget of at most 100 line-item continuation GraphQL network attempts across all orders. Retries count against this budget. If it is exhausted, remaining line items are not requested; totals from the orders and line items already read are returned as partial with an explicit budget-exhaustion reason.
+- Pagination safety caps are explicit and never treated as complete when Shopify still reports `hasNextPage`: at most 1,000 orders per selected period (40 × 25), 1,000 product variants for inventory (50 × 20), 9,910 line items per order (10 initial plus 99 × 100), and 2,410 inventory levels per variant (10 initial plus 24 × 100). Hitting a cap leaves the section `partial`; the reason states how much was read and that additional records were omitted. This is a deliberate request/runtime bound, not a Shopify API maximum.
 - Mixed shop currencies make revenue unavailable without discarding order/unit values. Incomplete inventory levels are excluded from low/out-of-stock classification and counted as unknown.
 
 ## Shopify API references
@@ -53,3 +56,4 @@ This document defines the read-only sales and inventory metrics shown on StockHu
 - [Location active state and accepted scopes](https://shopify.dev/docs/api/admin-graphql/2026-10/objects/Location)
 - [Shop timezone and currency](https://shopify.dev/docs/api/admin-graphql/2026-10/objects/Shop)
 - [GraphQL cursor pagination](https://shopify.dev/docs/api/usage/pagination-graphql)
+- [GraphQL Admin API rate limits and cost/throttle extensions](https://shopify.dev/docs/apps/build/apis/graphql-admin/rate-limits)

@@ -55,12 +55,31 @@ test("untracked-only inventory is explicitly partial and is not presented as ver
   assert.deepEqual(result.outOfStockVariants, []);
 });
 
-test("Overview labels partial inventory as a lower bound and avoids claiming unknown stock is verified", async () => {
-  const dashboard = await readFile(repoFile("app/components/OverviewDashboard.tsx"), "utf8");
-  assert.match(dashboard, /analytics\.inventory\.status === "partial" \? "At least "/,
-    "partial inventory counts are visibly qualified as lower bounds");
-  assert.match(dashboard, /No low-stock or out-of-stock SKU can be confirmed from the available tracked inventory data\./,
+test("Overview labels partial inventory counts as observed data, not as a guaranteed lower bound", async () => {
+  const metrics = await readFile(repoFile("app/components/overview/OverviewMetrics.tsx"), "utf8");
+  const attention = await readFile(repoFile("app/components/overview/InventoryAttention.tsx"), "utf8");
+  assert.match(metrics, /analytics\.inventory\.status === "partial" \? "Observed "/,
+    "partial inventory counts must be presented as observations, since unseen duplicate-SKU variants can change the aggregate classification");
+  assert.doesNotMatch(metrics, /analytics\.inventory\.status === "partial" \? "At least "/,
+    "a partial count is not necessarily a lower bound when unread variants can share a SKU and move it across the threshold");
+  assert.match(attention, /analytics\.inventory\.status === "partial" && analytics\.inventory\.message/,
+    "the inventory attention section retains its explicit partial-data explanation alongside observed counts");
+  assert.match(attention, /Unknown and untracked inventory is excluded, never treated as zero/,
     "unknown or untracked availability is not described as verified zero stock");
+});
+
+test("analytics metric docs describe observed partial inventory counts and the shared per-load line-item attempt budget", async () => {
+  const metrics = await readFile(repoFile("docs/OVERVIEW_ANALYTICS_METRICS.md"), "utf8");
+
+  assert.match(metrics, /observed counts are not guaranteed lower bounds/i,
+    "partial inventory classifications are observations, not guaranteed lower bounds");
+  assert.doesNotMatch(metrics, /low\/out-of-stock[^\n]*\bat least\b/i,
+    "partial inventory counts must not claim to be a lower bound when unseen same-SKU variants can change classification");
+
+  assert.match(metrics, /Each analytics load[^\n]*shared budget of at most 100 line-item continuation GraphQL network attempts across all orders/i,
+    "the docs must state that the 100 continuation attempt budget is shared across the analytics load");
+  assert.match(metrics, /Retries count against this budget/i,
+    "continuation retries must consume the shared per-load attempt budget");
 });
 
 test("an unmatched Size/Color combination is a non-confirmable conflict when the executor cannot add it to an existing product", async () => {

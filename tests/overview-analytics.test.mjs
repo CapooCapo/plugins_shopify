@@ -1,20 +1,30 @@
 /* eslint-env node */
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import ts from "typescript";
+import { createServer } from "vite";
 
-const analyticsModule = new URL("../app/utils/overview-analytics.shared.ts", import.meta.url);
+const vite = await createServer({
+  configFile: false,
+  root: process.cwd(),
+  appType: "custom",
+  server: { middlewareMode: true, hmr: false },
+  optimizeDeps: { noDiscovery: true, include: [], entries: [] },
+  logLevel: "error",
+});
+test.after(async () => vite.close());
 
 async function loadAnalyticsHelpers() {
-  const source = await readFile(analyticsModule, "utf8");
-  const javascript = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-  }).outputText;
-  const helpers = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+  const helpers = await vite.ssrLoadModule("/app/utils/overview-analytics.shared.ts");
   for (const name of ["computeShopLocalDateWindow", "aggregateSalesOrders", "aggregateInventoryVariants"]) {
     assert.equal(typeof helpers[name], "function", `${name} must be exported from the shared analytics module`);
   }
+  return helpers;
+}
+
+async function loadSampleAnalyticsHelpers() {
+  const helpers = await vite.ssrLoadModule("/app/utils/overview-analytics-demo.ts");
+  assert.equal(typeof helpers.createSampleSalesSection, "function",
+    "createSampleSalesSection must be exported from the sample analytics module");
   return helpers;
 }
 
@@ -45,6 +55,27 @@ test("sales windows use shop-local calendar days, include today, and return UTC 
   assert.equal(thirtyDays.dates.at(-1), "2026-10-28", "the selected local day includes today");
   assert.equal(thirtyDays.startUtc, "2026-09-28T17:00:00.000Z");
   assert.equal(thirtyDays.endExclusiveUtc, "2026-10-28T17:00:00.000Z");
+});
+
+test("sample daily sales metrics are stable across overlapping 7-day and 30-day shop-local windows", async () => {
+  const { createSampleSalesSection } = await loadSampleAnalyticsHelpers();
+  const timeZone = "Asia/Ho_Chi_Minh";
+  const now = new Date("2026-10-28T16:30:00.000Z");
+  const sevenDayDaily = createSampleSalesSection(7, timeZone, now).data.daily;
+  const thirtyDayDaily = createSampleSalesSection(30, timeZone, now).data.daily;
+  const thirtyDayByDate = new Map(thirtyDayDaily.map((day) => [day.date, day]));
+  const overlappingDays = sevenDayDaily.filter(({ date }) => thirtyDayByDate.has(date));
+
+  assert.equal(overlappingDays.length, sevenDayDaily.length,
+    "the 30-day window must contain every shop-local date in the 7-day window");
+  for (const { date, revenue, orders, units } of overlappingDays) {
+    const thirtyDayEntry = thirtyDayByDate.get(date);
+    assert.deepEqual(
+      { revenue, orders, units },
+      { revenue: thirtyDayEntry.revenue, orders: thirtyDayEntry.orders, units: thirtyDayEntry.units },
+      `sample daily metrics must match for the overlapping shop-local date ${date}`,
+    );
+  }
 });
 
 const money = (amount, currencyCode = "USD") => ({ shopMoney: { amount: String(amount), currencyCode } });
@@ -164,6 +195,8 @@ test("sales aggregation emits zero-filled shop-local daily buckets and marks mix
   ], { currencyCode: "USD", timeZone: "UTC", dates: ["2026-10-27", "2026-10-28", "2026-10-29"] });
 
   assert.equal(result.status, "partial", "orders and unit counts remain available when revenue currency is mixed");
+  assert.equal(result.demandComplete, true,
+    "currency-only gaps do not withhold complete per-variant units from Restock Planner calculations");
   assert.equal(result.currencyMismatch, true);
   assert.equal(typeof result.reason, "string");
   assert.deepEqual(result.totals, { revenue: null, orders: 2, units: 3 },
@@ -175,6 +208,83 @@ test("sales aggregation emits zero-filled shop-local daily buckets and marks mix
   ]);
   assert.ok(result.topProducts.every(({ revenue }) => revenue === null));
   assert.ok(result.topVariants.every(({ revenue }) => revenue === null));
+});
+
+test("live VND sales convert to USD with shop-local dated rates before aggregation", async () => {
+  const { aggregateSalesOrders } = await loadAnalyticsHelpers();
+  const alpha = product("gid://shopify/Product/30", "Alpha", "30");
+  const beta = product("gid://shopify/Product/31", "Beta", "31");
+  const alphaSmall = variant("gid://shopify/ProductVariant/300", alpha.id, alpha.title, "Small", "ALPHA-S", "300");
+  const alphaLarge = variant("gid://shopify/ProductVariant/301", alpha.id, alpha.title, "Large", "ALPHA-L", "301");
+  const betaDefault = variant("gid://shopify/ProductVariant/310", beta.id, beta.title, "Default", "BETA-1", "310");
+  const result = aggregateSalesOrders([
+    order({
+      id: "vnd-order-local-oct-30",
+      createdAt: "2026-10-29T17:00:00.000Z", // 2026-10-30 in Asia/Ho_Chi_Minh.
+      lineItems: [
+        lineItem({ id: "vnd-1m", currentQuantity: 2, amount: 1_000_000, currencyCode: "VND", itemProduct: alpha, itemVariant: alphaSmall }),
+        lineItem({ id: "vnd-1k", currentQuantity: 1, amount: 1_000, currencyCode: "VND", itemProduct: alpha, itemVariant: alphaLarge }),
+      ],
+    }),
+    order({
+      id: "vnd-order-local-nov-1",
+      createdAt: "2026-10-31T17:00:00.000Z", // 2026-11-01 in Asia/Ho_Chi_Minh; uses the nearest prior rate.
+      lineItems: [lineItem({ id: "vnd-500k", currentQuantity: 2, amount: 500_000, currencyCode: "VND", itemProduct: beta, itemVariant: betaDefault })],
+    }),
+  ], {
+    currencyCode: "VND",
+    timeZone: "Asia/Ho_Chi_Minh",
+    dates: ["2026-10-30", "2026-10-31", "2026-11-01"],
+    usdRatesByDate: new Map([
+      ["2026-10-30", { VND: 0.000038797 }],
+      ["2026-10-31", { VND: 0.00004 }],
+    ]),
+  });
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.currencyCode, "USD");
+  assert.deepEqual(result.totals, { revenue: 58.8358, orders: 2, units: 5 },
+    "line values use their applicable USD rate, sum without intermediate rounding, then round to four decimals");
+  assert.deepEqual(result.daily, [
+    { date: "2026-10-30", revenue: 38.8358, orders: 1, units: 3 },
+    { date: "2026-10-31", revenue: 0, orders: 0, units: 0 },
+    { date: "2026-11-01", revenue: 20, orders: 1, units: 2 },
+  ], "rates use the order's shop-local date and carry the nearest prior rate across a missing date");
+  assert.deepEqual(result.topProducts.map(({ id, units, revenue }) => ({ id, units, revenue })), [
+    { id: alpha.id, units: 3, revenue: 38.8358 },
+    { id: beta.id, units: 2, revenue: 20 },
+  ], "product ranking revenue is normalized to USD along with aggregate totals");
+  assert.deepEqual(result.topVariants.map(({ id, units, revenue }) => ({ id, units, revenue })), [
+    { id: betaDefault.id, units: 2, revenue: 20 },
+    { id: alphaSmall.id, units: 2, revenue: 38.797 },
+    { id: alphaLarge.id, units: 1, revenue: 0.0388 },
+  ], "equal-unit variant rows retain the existing title tie-break order");
+});
+
+test("missing historical USD rates withhold monetary revenue without losing orders or units", async () => {
+  const { aggregateSalesOrders } = await loadAnalyticsHelpers();
+  const item = product("gid://shopify/Product/32", "Unrated VND product", "32");
+  const itemVariant = variant("gid://shopify/ProductVariant/320", item.id, item.title, "Default", "VND-32", "320");
+  const result = aggregateSalesOrders([
+    order({
+      id: "vnd-order-without-rate",
+      createdAt: "2026-10-29T17:00:00.000Z",
+      lineItems: [lineItem({ id: "vnd-no-rate", currentQuantity: 3, amount: 1_000_000, currencyCode: "VND", itemProduct: item, itemVariant })],
+    }),
+  ], {
+    currencyCode: "VND",
+    timeZone: "Asia/Ho_Chi_Minh",
+    dates: ["2026-10-30"],
+    usdRatesByDate: new Map(),
+  });
+
+  assert.equal(result.status, "partial");
+  assert.equal(result.currencyCode, "USD", "the display currency remains USD, never the source currency label");
+  assert.equal(result.currencyMismatch, false);
+  assert.deepEqual(result.totals, { revenue: null, orders: 1, units: 3 });
+  assert.deepEqual(result.daily, [{ date: "2026-10-30", revenue: null, orders: 1, units: 3 }]);
+  assert.equal(result.topProducts[0].revenue, null);
+  assert.equal(result.topVariants[0].revenue, null);
 });
 
 test("sales aggregation excludes test orders and treats a missing test flag as incomplete rather than live sales", async () => {
@@ -206,6 +316,7 @@ test("sales aggregation excludes test orders and treats a missing test flag as i
   });
 
   assert.equal(result.status, "partial", "an order without Shopify's test flag makes the aggregate incomplete");
+  assert.equal(result.demandComplete, false, "missing test-order classification makes sales demand incomplete");
   assert.deepEqual(result.totals, { revenue: 24, orders: 1, units: 2 },
     "test and unknown-test-flag orders are excluded from all aggregate totals");
   assert.deepEqual(result.daily, [{ date: "2026-10-28", revenue: 24, orders: 1, units: 2 }]);
@@ -293,4 +404,21 @@ test("inventory aggregation classifies duplicate nonempty SKUs by their combined
     "a duplicate SKU with any unknown variant is not classified from only the known quantity");
   assert.equal(result.outOfStockVariants.some(({ sku }) => sku === "SHARED-UNKNOWN"), false,
     "unknown duplicate-SKU availability is not treated as zero");
+});
+
+test("gift card variants are counted as non-physical and excluded from restock totals", async () => {
+  const { aggregateInventoryVariants } = await loadAnalyticsHelpers();
+  const result = aggregateInventoryVariants([{
+    id: "gift-card-variant",
+    title: "Digital gift card",
+    sku: "GIFT-25",
+    product: { id: "gift-card-product", title: "Digital Gift Card", giftCard: true },
+    tracked: true,
+    levels: [{ isActive: true, available: 0 }],
+  }]);
+
+  assert.equal(result.nonPhysicalCount, 1);
+  assert.equal(result.outOfStockSkuCount, 0);
+  assert.equal(result.lowStockSkuCount, 0);
+  assert.equal(result.totalTrackedKnown, 0);
 });

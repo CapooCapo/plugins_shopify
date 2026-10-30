@@ -1,4 +1,5 @@
 /* eslint-env node */
+/* global globalThis */
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "vite";
@@ -57,7 +58,7 @@ function response(data) {
   return new Response(JSON.stringify({ data }), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-function makeAdmin({ shop, scopes, locationActive = true, calls, skuBarrier }) {
+function makeAdmin({ shop, scopes, locationActive = true, calls, skuBarrier, skuMatches = false }) {
   return {
     async graphql(query, options = {}) {
       const name = query.match(/(?:query|mutation)\s+(\w+)/)?.[1] ?? "unknown";
@@ -72,6 +73,15 @@ function makeAdmin({ shop, scopes, locationActive = true, calls, skuBarrier }) {
           return response({ locations: { nodes: [{ id: "gid://shopify/Location/10", name: "Main warehouse", isActive: locationActive }], pageInfo: { hasNextPage: false, endCursor: null } } });
         case "StockHubRecheckSku":
           if (skuBarrier) return skuBarrier.wait();
+          if (skuMatches) {
+            const sku = options.variables?.query?.match(/sku:\\?"([^"]+)/)?.[1] ?? "HTTP-SKU";
+            return response({ productVariants: { edges: [{ node: {
+              id: "gid://shopify/ProductVariant/20", sku, title: "Default",
+              product: { id: "gid://shopify/Product/30", title: "Existing", status: "ACTIVE" },
+              inventoryItem: { id: "gid://shopify/InventoryItem/40", tracked: true,
+                inventoryLevel: { quantities: [{ name: "available", quantity: 11 }] } },
+            } }], pageInfo: { hasNextPage: false, endCursor: null } } });
+          }
           return response({ productVariants: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } } });
         case "StockHubFindDraftMarker":
           return response({ productByIdentifier: null });
@@ -88,6 +98,11 @@ function makeAdmin({ shop, scopes, locationActive = true, calls, skuBarrier }) {
           return response({ productVariantsBulkUpdate: { productVariants: [{ id: options.variables.variantId, price: options.variables.price }], userErrors: [] } });
         case "StockHubActivateDraftInventory":
           return response({ inventoryActivate: { inventoryLevel: { id: "gid://shopify/InventoryLevel/300", quantities: [{ name: "available", quantity: options.variables.quantity }] }, userErrors: [] } });
+        case "StockHubAdjustIncoming":
+          return response({ inventoryAdjustQuantities: {
+            inventoryAdjustmentGroup: { id: "gid://shopify/InventoryAdjustmentGroup/300" },
+            userErrors: [],
+          } });
         default:
           throw new Error(`Unexpected mocked Admin GraphQL operation ${name}`);
       }
@@ -95,8 +110,18 @@ function makeAdmin({ shop, scopes, locationActive = true, calls, skuBarrier }) {
   };
 }
 
-function mergeRequest(batchId, intent = "merge", confirmed = "yes", confirmedCount = "1") {
-  const form = new URLSearchParams({ intent, batchId, confirmed, confirmedCount });
+function mergeRequest(batchId, intent = "merge", confirmed = "yes", confirmedCount = "1", extra = {}) {
+  const form = new URLSearchParams({ intent, batchId, confirmed, confirmedCount, expectedRevision: "0" });
+  for (const [key, value] of Object.entries(extra)) form.set(key, String(value));
+  return new Request(`http://localhost/app/imports/history/${batchId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Test-Request": crypto.randomUUID() },
+    body: form,
+  });
+}
+
+function approvalRequest(batchId, intent, approvalId) {
+  const form = new URLSearchParams({ intent, batchId, approvalId });
   return new Request(`http://localhost/app/imports/history/${batchId}`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Test-Request": crypto.randomUUID() },
@@ -148,21 +173,18 @@ test("actual Import History route action serializes concurrent Merge POSTs on is
   const requestB = mergeRequest(batchId);
   const responseAWait = action({ request: requestA, params: { batchId }, context: {} });
   await started;
-  // Two HTTP action requests overlap. Expire only this isolated test receipt's
-  // lease to model a timed-out worker, then let request B take ownership.
-  await prisma.importBatch.update({ where: { id: batchId }, data: { updatedAt: new Date(Date.now() - 16 * 60_000) } });
+  // Two HTTP initial confirmations overlap. Keep the first worker's lease
+  // current: this test exercises duplicate confirmation, while stale leases
+  // are covered by dedicated service-level recovery tests.
   const responseBWait = action({ request: requestB, params: { batchId }, context: {} });
   const responseB = await responseBWait;
   releaseA(response({ productVariants: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } } }));
   const responseA = await responseAWait;
 
   assert.equal(authenticatedRequests.length, 2, "both HTTP actions use authentication");
-  assert.ok(responseA instanceof Response);
-  assert.ok(responseB instanceof Response);
-  assert.equal(responseA.status, 302);
-  assert.equal(responseB.status, 302);
-  assert.equal(responseA.headers.get("Location"), `/app/imports/history/${batchId}`);
-  assert.equal(responseB.headers.get("Location"), `/app/imports/history/${batchId}`);
+  assert.equal(responseA.mergeProgress?.status, "COMPLETED");
+  assert.match(responseB.error ?? "", /already being processed|active approval/i,
+    "a repeated initial confirmation cannot take over or dispatch another worker");
 
   const finalBatch = await prisma.importBatch.findFirstOrThrow({ where: { id: batchId, shop }, include: { lines: true } });
   assert.equal(finalBatch.status, "COMPLETED");
@@ -182,7 +204,7 @@ test("actual Import History route action serializes concurrent Merge POSTs on is
   assert.equal(staleCountResume.error, "Confirm the current number of eligible rows and any excluded rows before merging.");
   const resumeResponse = await action({ request: mergeRequest(batchId, "resume", "yes", "0"), params: { batchId }, context: {} });
   const afterResume = mutationCalls.filter(({ name }) => writeOperations.includes(name)).length;
-  assert.equal(resumeResponse.status, 302);
+  assert.equal(resumeResponse.mergeProgress?.status, "COMPLETED");
   assert.equal(afterResume, beforeResume);
 
   // Replaying an already-completed Resume repeatedly must remain a no-op for
@@ -190,7 +212,7 @@ test("actual Import History route action serializes concurrent Merge POSTs on is
   const repeatedResumeResponse = await action({ request: mergeRequest(batchId, "resume", "yes", "0"), params: { batchId }, context: {} });
   const afterRepeatedResume = mutationCalls.filter(({ name }) => writeOperations.includes(name)).length;
   const afterReplay = await prisma.importBatch.findFirstOrThrow({ where: { id: batchId, shop }, include: { lines: true, activityLogs: true } });
-  assert.equal(repeatedResumeResponse.status, 302);
+  assert.equal(repeatedResumeResponse.mergeProgress?.status, "COMPLETED");
   assert.equal(afterRepeatedResume, beforeResume);
   assert.equal(afterReplay.status, "COMPLETED");
   assert.equal(afterReplay.completedAt?.getTime(), beforeReplay.completedAt?.getTime());
@@ -201,7 +223,85 @@ test("actual Import History route action serializes concurrent Merge POSTs on is
   assert.equal(afterReplay.activityLogs.filter(({ eventType }) => eventType === "IMPORT_LINE_RESULT").length,
     beforeReplay.activityLogs.filter(({ eventType }) => eventType === "IMPORT_LINE_RESULT").length);
   assert.equal(afterReplay.activityLogs.filter(({ eventType, outcome }) => eventType === "IMPORT_RESUME" && outcome === "SUCCEEDED").length,
-    beforeReplay.activityLogs.filter(({ eventType, outcome }) => eventType === "IMPORT_RESUME" && outcome === "SUCCEEDED").length + 2);
+    beforeReplay.activityLogs.filter(({ eventType, outcome }) => eventType === "IMPORT_RESUME" && outcome === "SUCCEEDED").length,
+    "completed no-op Resume replays do not create successful execution-history events");
+});
+
+test("actual Import History action continues one confirmed 51-row snapshot in bounded chunks without reconfirmation", { skip: !databaseUrl }, async (t) => {
+  const { prisma, action } = await setup(t);
+  const shop = `http-one-click-${crypto.randomUUID()}.myshopify.com`;
+  const batchId = `http-one-click-batch-${crypto.randomUUID()}`;
+  const scopes = ["read_products", "read_inventory", "read_locations", "write_inventory"];
+  const lineIds = Array.from({ length: 51 }, (_, index) => `http-one-click-line-${crypto.randomUUID()}-${index}`);
+  const calls = [];
+  await prisma.importBatch.deleteMany({ where: { shop } });
+  t.after(async () => prisma.importBatch.deleteMany({ where: { shop } }));
+  await prisma.importBatch.create({ data: {
+    id: batchId, shop, submissionId: crypto.randomUUID(), receiptCode: `IMP-${crypto.randomUUID()}`,
+    fileChecksum: `checksum-${crypto.randomUUID()}`, fileName: "51-lines.csv",
+    locationId: "gid://shopify/Location/10", locationName: "Main warehouse", currencyCode: "USD",
+    status: "PREVIEWED", revision: 0,
+    lines: { create: lineIds.map((id, index) => ({
+      id, rowNumber: index + 2, sku: `HTTP-${String(index + 1).padStart(3, "0")}`, title: `HTTP item ${index + 1}`,
+      description: "Action-boundary chunk test", price: "10.00", quantity: 2,
+      operationType: "ADJUST", status: "PREVIEWED", stage: "PREPARED",
+      operationId: `operation-${id}`, idempotencyKey: `key-${id}`,
+      productId: "gid://shopify/Product/30", variantId: "gid://shopify/ProductVariant/20",
+      inventoryItemId: "gid://shopify/InventoryItem/40", expectedQuantity: 11,
+    })) },
+  } });
+
+  const admin = makeAdmin({ shop, scopes, calls, skuMatches: true });
+  globalThis.__stockhubHttpTest.auth = async () => ({
+    session: { shop, userId: 7n, firstName: "Test", lastName: "Merchant", email: "test@example.invalid", accountOwner: true },
+    admin,
+    scopes: { query: async () => ({ granted: scopes }) },
+  });
+
+  // This is the single merchant confirmation. The action returns the first
+  // server-bounded chunk and a durable approval identity for client auto-next.
+  const initial = await action({ request: mergeRequest(batchId, "merge", "yes", "51"), params: { batchId }, context: {} });
+  assert.ok(initial.mergeProgress, JSON.stringify(initial));
+  assert.deepEqual(initial.mergeProgress, {
+    batchId,
+    approvalId: initial.mergeProgress.approvalId,
+    approvalStatus: "ACTIVE",
+    chunkNumber: 1,
+    continueRequired: true,
+    status: "PARTIAL",
+  });
+  assert.ok(initial.mergeProgress.approvalId);
+  assert.equal(calls.filter(({ name }) => name === "StockHubAdjustIncoming").length, 50);
+
+  // Match the UI's follow-up POST exactly: no confirmed flag/count or line IDs.
+  const continued = await action({
+    request: approvalRequest(batchId, "continueMerge", initial.mergeProgress.approvalId),
+    params: { batchId },
+    context: {},
+  });
+  assert.equal(continued.mergeProgress.approvalId, initial.mergeProgress.approvalId);
+  assert.equal(continued.mergeProgress.approvalStatus, "COMPLETED");
+  assert.equal(continued.mergeProgress.chunkNumber, 2);
+  assert.equal(continued.mergeProgress.continueRequired, false);
+  assert.equal(continued.mergeProgress.status, "COMPLETED");
+  assert.equal(calls.filter(({ name }) => name === "StockHubAdjustIncoming").length, 51);
+  const approval = await prisma.importMergeApproval.findFirstOrThrow({
+    where: { id: initial.mergeProgress.approvalId, shop, batchId },
+  });
+  assert.equal(approval.processedCount, 51);
+  assert.equal(approval.chunkNumber, 2);
+  assert.equal(approval.status, "COMPLETED");
+  assert.equal(await prisma.importLine.count({ where: { batchId, status: "SUCCEEDED" } }), 51);
+
+  const beforeReplay = calls.filter(({ name }) => name === "StockHubAdjustIncoming").length;
+  const replay = await action({
+    request: approvalRequest(batchId, "continueMerge", initial.mergeProgress.approvalId),
+    params: { batchId },
+    context: {},
+  });
+  assert.equal(replay.mergeProgress.approvalStatus, "COMPLETED");
+  assert.equal(calls.filter(({ name }) => name === "StockHubAdjustIncoming").length, beforeReplay,
+    "replaying an already completed auto-next request does not repeat Shopify writes");
 });
 
 test("actual Import History action rejects unconfirmed and cross-tenant Merge POSTs", { skip: !databaseUrl }, async (t) => {

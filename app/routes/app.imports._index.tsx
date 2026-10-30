@@ -109,6 +109,15 @@ type ActionData = {
     createdAt: Date;
   };
   verification?: Awaited<ReturnType<typeof verifyImportBatchShopifyState>>;
+  mergeProgress?: {
+    batchId: string;
+    approvalId: string | null;
+    approvalStatus: string | null;
+    chunkNumber: number;
+    continueRequired: boolean;
+    status: string;
+    paused?: boolean;
+  };
 };
 
 const SCOPE_VERIFICATION_UNAVAILABLE =
@@ -431,7 +440,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
     try {
       await prisma.$transaction(async (tx) => {
-        const claimed = await tx.importBatch.updateMany({ where: { id: batch.id, shop: session.shop, status: "PREVIEWED", updatedAt: expectedUpdatedAt }, data: { updatedAt: new Date(Math.max(Date.now(), expectedUpdatedAt.getTime() + 1)) } });
+        const claimed = await tx.importBatch.updateMany({ where: { id: batch.id, shop: session.shop, status: "PREVIEWED", revision: batch.revision, updatedAt: expectedUpdatedAt }, data: { revision: { increment: 1 }, updatedAt: new Date(Math.max(Date.now(), expectedUpdatedAt.getTime() + 1)) } });
         if (claimed.count !== 1) throw new Error("DRAFT_CONFLICT");
         if (intent === "draftAddLine" || intent === "draftEditLine") {
           for (const candidate of preparedLines) {
@@ -545,91 +554,166 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { verification } satisfies ActionData;
   }
 
-  if (intent === "merge" || intent === "resume") {
-    if (formData.get("confirmed") !== "yes") {
-      return { error: "Explicit confirmation is required before writing to Shopify." } satisfies ActionData;
-    }
+  const mergeIntent = typeof intent === "string" ? intent : "";
+  if (["merge", "resume", "continueMerge", "resumeApprovedMerge", "pauseMerge"].includes(mergeIntent)) {
     const batchId = String(formData.get("batchId") ?? "");
+    if (!batchId) return { error: "The import receipt identity is missing." } satisfies ActionData;
     const batch = await prisma.importBatch.findFirst({
       where: { id: batchId, shop: session.shop },
       include: { lines: { orderBy: { rowNumber: "asc" } } },
     });
     if (!batch) return { error: "This import receipt was not found in the authenticated store." } satisfies ActionData;
-    const excludedLines = batch.lines.filter((line) => line.status === "BLOCKED" || line.operationType === "BLOCKED").length;
-    const eligibleLines = batch.lines.filter((line) => !["SUCCEEDED", "BLOCKED"].includes(line.status) && line.operationType !== "BLOCKED").length;
-    const completedResumeReplay = intent === "resume"
-      && batch.status === "COMPLETED"
-      && batch.lines.length > 0
-      && batch.lines.every((line) => line.status === "SUCCEEDED" && line.stage === "COMPLETED");
-    if ((eligibleLines === 0 && !completedResumeReplay)
-      || String(formData.get("confirmedCount") ?? "") !== String(eligibleLines)
-      || (excludedLines > 0 && formData.get("partialConfirmed") !== "yes")) {
-      return { error: "Confirm the current number of eligible rows and any excluded rows before merging." } satisfies ActionData;
-    }
-    const neededScopes = new Set(["read_products", "read_inventory", "read_locations", "write_inventory"]);
-    const needsProductWrite = batch.lines.some(
-      (line) =>
-        line.operationType === "CREATE_DRAFT" &&
-        !["SUCCEEDED", "BLOCKED"].includes(line.status) &&
-        !["VARIANT_PRICE_CONFIGURED", "INVENTORY_ACTIVATING", "INVENTORY_ACTIVE"].includes(line.stage),
-    );
-    if (needsProductWrite) neededScopes.add("write_products");
-    const missing = missingScopesForGrant(grantedScopes, [...neededScopes]);
-    if (missing.length) {
-      return {
-        error: `Shopify authorization is missing: ${missing.join(", ")}. Reauthorize the app before merging.`,
-      } satisfies ActionData;
-    }
-    const locationContext = await queryLocations(admin);
-    if (locationContext.status !== "ready") {
-      return { error: locationContext.message } satisfies ActionData;
-    }
-    if (!sameScopeGrant(grantedScopes, locationContext.scopes)) {
-      return { authorizationError: SCOPE_VERIFICATION_MISMATCH } satisfies ActionData;
-    }
-    if (locationContext.shopDomain.toLowerCase() !== session.shop.toLowerCase()) {
-      return {
-        error: "The authenticated Shopify session and Admin API returned different stores. Open StockHub from the intended store and retry.",
-      } satisfies ActionData;
-    }
-    if (!locationContext.locations.some((location) => location.id === batch.locationId && location.isActive)) {
-      return {
-        error: "The selected location is not active and authorized for this authenticated Shopify store. No merge was started.",
-      } satisfies ActionData;
-    }
-    if (completedResumeReplay) {
-      const replay = await mergeImportBatch({ shop: session.shop, batchId, admin, prisma });
-      if (replay.status !== "COMPLETED") {
-        return { error: "The completed import could not be safely replayed. Refresh to inspect its persisted status." } satisfies ActionData;
+
+    const postedApprovalId = String(formData.get("approvalId") ?? "");
+    if (mergeIntent === "pauseMerge") {
+      if (!postedApprovalId || batch.activeMergeApprovalId !== postedApprovalId) {
+        return { error: "This Pause request does not match the receipt's active approval." } satisfies ActionData;
+      }
+      const paused = await prisma.importMergeApproval.updateMany({
+        where: { id: postedApprovalId, shop: session.shop, batchId, status: "ACTIVE" },
+        data: { status: "PAUSED" },
+      });
+      const approval = await prisma.importMergeApproval.findFirst({ where: { id: postedApprovalId, shop: session.shop, batchId } });
+      if (!approval || (paused.count !== 1 && approval.status !== "PAUSED")) {
+        return { error: "The saved approval is no longer active; refresh to inspect its current state." } satisfies ActionData;
       }
       const actor = actorFromShopifySession(session);
-      const replayId = randomUUID();
+      const pauseId = randomUUID();
       await appendActivity({
         shop: session.shop,
         actor,
-        eventType: "IMPORT_RESUME",
+        eventType: "IMPORT_MERGE_PAUSED",
         outcome: "SUCCEEDED",
         importBatchId: batch.id,
         receiptCode: batch.receiptCode,
-        attemptId: replayId,
-        sourceKey: `attempt:${replayId}:replay`,
-        summary: `Resume replay confirmed ${batch.receiptCode} was already complete; no Shopify changes were made.`,
-        metadata: { replayed: true, lineCount: replay.lines.length, status: replay.status },
+        attemptId: pauseId,
+        sourceKey: `attempt:${pauseId}:pause`,
+        summary: `Automatic Merge continuation was paused for ${batch.receiptCode}. Completed Shopify changes remain in place.`,
+        metadata: { approvalId: approval.id, chunkNumber: approval.chunkNumber, processedCount: approval.processedCount },
       }, prisma);
-      return redirect(`/app/imports/history/${encodeURIComponent(batchId)}`);
+      return { mergeProgress: {
+        batchId,
+        approvalId: approval.id,
+        approvalStatus: approval.status,
+        chunkNumber: approval.chunkNumber,
+        continueRequired: false,
+        status: batch.status,
+        paused: true,
+      } } satisfies ActionData;
     }
-    const attemptId = randomUUID();
+
+    const initialConfirmation = mergeIntent === "merge" || mergeIntent === "resume";
+    if (initialConfirmation && formData.get("confirmed") !== "yes") {
+      return { error: "Explicit confirmation is required before writing to Shopify." } satisfies ActionData;
+    }
+    const eligibleLines = batch.lines.filter((line) => !["SUCCEEDED", "BLOCKED"].includes(line.status) && line.operationType !== "BLOCKED");
+    const excludedLines = batch.lines.filter((line) => line.status === "BLOCKED" || line.operationType === "BLOCKED");
+    const completedResumeReplay = mergeIntent === "resume"
+      && batch.status === "COMPLETED"
+      && batch.lines.length > 0
+      && batch.lines.every((line) => line.status === "SUCCEEDED" && line.stage === "COMPLETED");
+    if (initialConfirmation && ((eligibleLines.length === 0 && !completedResumeReplay)
+      || String(formData.get("confirmedCount") ?? "") !== String(eligibleLines.length)
+      || (excludedLines.length > 0 && formData.get("partialConfirmed") !== "yes"))) {
+      return { error: "Confirm the current number of eligible rows and any excluded rows before merging." } satisfies ActionData;
+    }
+    if (mergeIntent === "merge" && eligibleLines.some((line) => !["PREVIEWED"].includes(line.status) || line.stage !== "PREPARED")) {
+      return { error: "This receipt has failed or uncertain work. Use explicit Resume to reconcile it safely." } satisfies ActionData;
+    }
+
+    let serviceIntent: "continue" | "merge" | "resume" = "continue";
+    if (mergeIntent === "merge" || mergeIntent === "resume") serviceIntent = mergeIntent;
+    let confirmedLineIds: string[] = [];
+    let expectedRevision: number | undefined;
+    let approvalId: string | undefined;
+    if (initialConfirmation) {
+      const revision = Number(String(formData.get("expectedRevision") ?? ""));
+      if (!Number.isSafeInteger(revision) || revision !== batch.revision) {
+        return { error: "This receipt changed after the confirmation was prepared. Refresh and review the current eligible rows." } satisfies ActionData;
+      }
+      confirmedLineIds = eligibleLines.map((line) => line.id);
+      expectedRevision = revision;
+    } else {
+      approvalId = postedApprovalId;
+      if (!approvalId || batch.activeMergeApprovalId !== approvalId) {
+        return { error: "This continuation does not match the receipt's active approval." } satisfies ActionData;
+      }
+      const approval = await prisma.importMergeApproval.findFirst({ where: { id: approvalId, shop: session.shop, batchId } });
+      if (!approval) return { error: "The saved Merge approval was not found for this receipt." } satisfies ActionData;
+      if (mergeIntent === "continueMerge" && approval.status === "COMPLETED") {
+        // A browser may retry an auto-continue POST after losing its response.
+        // Return the persisted terminal state without requiring write scopes,
+        // creating another attempt record, or dispatching Shopify work.
+        return { mergeProgress: {
+          batchId,
+          approvalId: approval.id,
+          approvalStatus: approval.status,
+          chunkNumber: approval.chunkNumber,
+          continueRequired: false,
+          status: batch.status,
+        } } satisfies ActionData;
+      }
+      if (mergeIntent === "resumeApprovedMerge") {
+        if (approval.status === "PAUSED") {
+          const resumed = await prisma.importMergeApproval.updateMany({
+            where: { id: approvalId, shop: session.shop, batchId, status: "PAUSED" },
+            data: { status: "ACTIVE" },
+          });
+          if (resumed.count !== 1) return { error: "The saved approval changed while resuming. Refresh and retry." } satisfies ActionData;
+        } else if (approval.status !== "ACTIVE") {
+          return { error: "Only an active or paused saved approval can continue. Use explicit Resume to reconcile failed work." } satisfies ActionData;
+        }
+      } else if (approval.status !== "ACTIVE") {
+        return { error: "This saved approval is not active. Refresh to inspect its current state." } satisfies ActionData;
+      }
+    }
+
+    const needsProductWrite = eligibleLines.some(
+      (line) => line.operationType === "CREATE_DRAFT" && !["VARIANT_PRICE_CONFIGURED", "INVENTORY_ACTIVATING", "INVENTORY_ACTIVE"].includes(line.stage),
+    );
+    const neededScopes = new Set(["read_products", "read_inventory", "read_locations", "write_inventory"]);
+    if (needsProductWrite) neededScopes.add("write_products");
+    const missing = missingScopesForGrant(grantedScopes, [...neededScopes]);
+    if (missing.length) {
+      return { error: `Shopify authorization is missing: ${missing.join(", ")}. Reauthorize the app before merging.` } satisfies ActionData;
+    }
+    const locationContext = await queryLocations(admin);
+    if (locationContext.status !== "ready") return { error: locationContext.message } satisfies ActionData;
+    if (!sameScopeGrant(grantedScopes, locationContext.scopes)) return { authorizationError: SCOPE_VERIFICATION_MISMATCH } satisfies ActionData;
+    if (locationContext.shopDomain.toLowerCase() !== session.shop.toLowerCase()) {
+      return { error: "The authenticated Shopify session and Admin API returned different stores. Open StockHub from the intended store and retry." } satisfies ActionData;
+    }
+    if (!locationContext.locations.some((location) => location.id === batch.locationId && location.isActive)) {
+      return { error: "The selected location is not active and authorized for this authenticated Shopify store. No merge was started." } satisfies ActionData;
+    }
+
+    if (completedResumeReplay) {
+      const replay = await mergeImportBatch({ shop: session.shop, batchId, admin, prisma, intent: "resume", confirmedLineIds: [], expectedRevision: batch.revision });
+      return { mergeProgress: {
+        batchId,
+        approvalId: replay.approvalId,
+        approvalStatus: replay.approvalStatus,
+        chunkNumber: replay.chunkNumber,
+        continueRequired: false,
+        status: replay.status,
+      } } satisfies ActionData;
+    }
+
     const actor = actorFromShopifySession(session);
+    const attemptId = randomUUID();
+    const isResume = serviceIntent === "resume";
+    const displayIntent = isResume ? "Resume" : "Merge";
     await appendActivity({
       shop: session.shop,
       actor,
-      eventType: intent === "merge" ? "IMPORT_MERGE" : "IMPORT_RESUME",
+      eventType: isResume ? "IMPORT_RESUME" : "IMPORT_MERGE_CHUNK",
       outcome: "ATTEMPTED",
       importBatchId: batch.id,
       receiptCode: batch.receiptCode,
       attemptId,
       sourceKey: `attempt:${attemptId}:start`,
-      summary: `${intent === "merge" ? "Merge" : "Resume"} started for ${batch.receiptCode}.`,
+      summary: `${displayIntent} chunk requested for ${batch.receiptCode}.`,
+      metadata: { approvalId: approvalId ?? null, expectedRevision: expectedRevision ?? null },
     }, prisma);
     try {
       const result = await mergeImportBatch({
@@ -637,99 +721,98 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         batchId,
         admin,
         prisma,
+        intent: serviceIntent,
+        confirmedLineIds,
+        expectedRevision,
+        approvalId,
       });
-      const outcome = result.status === "COMPLETED" ? "SUCCEEDED"
-        : result.status === "UNCERTAIN" ? "UNCERTAIN" : "FAILED";
+      const changedLines = result.lines.filter((line) => {
+        const previous = batch.lines.find((candidate) => candidate.id === line.id);
+        return previous && previous.status !== line.status && previous.status !== "SUCCEEDED" && previous.status !== "BLOCKED";
+      });
+      const hasFailure = changedLines.some((line) => line.status === "FAILED");
+      const hasUnknown = changedLines.some((line) => ["UNCERTAIN", "RUNNING"].includes(line.status));
+      const outcome = hasUnknown ? "UNCERTAIN" : hasFailure ? "FAILED" : "SUCCEEDED";
       await prisma.$transaction(async (tx) => {
-        const successfulLines = result.lines.filter((line) => line.status === "SUCCEEDED");
-        const blockedLines = result.lines.filter((line) => line.status === "BLOCKED");
-        const activityLines = result.lines.filter((line) => {
-          const previous = batch.lines.find((candidate) => candidate.id === line.id)?.status;
-          return previous !== "SUCCEEDED" && previous !== "BLOCKED";
-        });
-        await tx.activityLog.create({
-          data: {
+        await tx.activityLog.create({ data: {
+          id: randomUUID(),
+          shop: session.shop,
+          eventType: "IMPORT_MERGE_CHUNK_RESULT",
+          outcome,
+          actorType: actor.actorType,
+          actorId: actor.actorId,
+          importBatchId: batch.id,
+          receiptCode: batch.receiptCode,
+          attemptId,
+          sourceKey: `attempt:${attemptId}:result`,
+          summary: `${displayIntent} chunk ${result.chunkNumber} for ${batch.receiptCode} finished: ${result.approvalStatus ?? result.status}.`,
+          metadataJson: JSON.stringify({
+            approvalId: result.approvalId,
+            approvalStatus: result.approvalStatus,
+            chunkNumber: result.chunkNumber,
+            processedLines: changedLines.length,
+            receiptLineCount: result.lines.length,
+            successfulLines: changedLines.filter((line) => line.status === "SUCCEEDED").length,
+            blockedLines: changedLines.filter((line) => line.status === "BLOCKED").length,
+            failedLines: changedLines.filter((line) => line.status === "FAILED").length,
+            uncertainLines: changedLines.filter((line) => ["UNCERTAIN", "RUNNING"].includes(line.status)).length,
+            continueRequired: result.continueRequired,
+          }),
+        } });
+        await tx.activityLog.createMany({ data: changedLines.map((line) => {
+          const sku = line.sku || "unknown SKU";
+          const quantity = line.quantity ?? 0;
+          const lineOutcome = line.status === "SUCCEEDED" ? "SUCCEEDED"
+            : line.status === "BLOCKED" ? "BLOCKED"
+              : line.status === "UNCERTAIN" || line.status === "RUNNING" ? "UNCERTAIN" : "FAILED";
+          const action = line.operationType === "CREATE_DRAFT"
+            ? `Created a Draft product and added ${quantity} units for SKU ${sku}`
+            : `Added ${quantity} units for SKU ${sku}`;
+          return {
             id: randomUUID(),
             shop: session.shop,
-            eventType: "IMPORT_RESULT",
-            outcome,
+            eventType: "IMPORT_LINE_RESULT",
+            outcome: lineOutcome,
             actorType: actor.actorType,
             actorId: actor.actorId,
             importBatchId: batch.id,
+            importLineId: line.id,
             receiptCode: batch.receiptCode,
             attemptId,
-            sourceKey: `attempt:${attemptId}:result`,
-            summary: `${intent === "merge" ? "Merge" : "Resume"} finished for ${batch.receiptCode}: ${result.status}.`,
-            metadataJson: JSON.stringify({
-              lineCount: result.lines.length,
-              successfulLines: successfulLines.length,
-              blockedLines: blockedLines.length,
-              failedLines: result.lines.filter((line) => line.status === "FAILED").length,
-              uncertainLines: result.lines.filter((line) => line.status === "UNCERTAIN").length,
-            }),
-          },
-        });
-        await tx.activityLog.createMany({
-          data: activityLines.map((line) => {
-            const sku = line.sku || "unknown SKU";
-            const quantity = line.quantity ?? 0;
-            const lineOutcome = line.status === "SUCCEEDED" ? "SUCCEEDED"
-              : line.status === "BLOCKED" ? "BLOCKED"
-                : line.status === "UNCERTAIN" || line.status === "RUNNING" ? "UNCERTAIN" : "FAILED";
-            const action = line.operationType === "CREATE_DRAFT"
-              ? `Created a Draft product and added ${quantity} units for SKU ${sku}`
-              : `Added ${quantity} units for SKU ${sku}`;
-            return {
-              id: randomUUID(),
-              shop: session.shop,
-              eventType: "IMPORT_LINE_RESULT",
-              outcome: lineOutcome,
-              actorType: actor.actorType,
-              actorId: actor.actorId,
-              importBatchId: batch.id,
-              importLineId: line.id,
-              receiptCode: batch.receiptCode,
-              attemptId,
-              sourceKey: `attempt:${attemptId}:line:${line.id}`,
-              summary: lineOutcome === "SUCCEEDED"
-                ? `${action}.`
-                : `Import line for SKU ${sku} finished with ${line.status}; check Import History before retrying.`,
-              metadataJson: JSON.stringify({
-                sku,
-                quantity,
-                operationType: line.operationType,
-                stage: line.stage,
-                errorCode: line.errorCode ?? null,
-              }),
-            };
-          }),
-        });
+            sourceKey: `attempt:${attemptId}:line:${line.id}`,
+            summary: lineOutcome === "SUCCEEDED" ? `${action}.` : `Import line for SKU ${sku} finished with ${line.status}; check Import History before retrying.`,
+            metadataJson: JSON.stringify({ sku, quantity, operationType: line.operationType, stage: line.stage, errorCode: line.errorCode ?? null }),
+          };
+        }) });
       });
-      return redirect(`/app/imports/history/${encodeURIComponent(batchId)}`);
+      return { mergeProgress: {
+        batchId,
+        approvalId: result.approvalId,
+        approvalStatus: result.approvalStatus,
+        chunkNumber: result.chunkNumber,
+        continueRequired: result.continueRequired,
+        status: result.status,
+      } } satisfies ActionData;
     } catch (error) {
-      const outcome = error instanceof MergeImportError && error.code.startsWith("BATCH_")
-        ? "BLOCKED"
-        : "UNCERTAIN";
+      const outcome = error instanceof MergeImportError && (error.code.startsWith("BATCH_") || error.code.startsWith("APPROVAL_"))
+        ? "BLOCKED" : "UNCERTAIN";
       await appendActivity({
         shop: session.shop,
         actor,
-        eventType: "IMPORT_RESULT",
+        eventType: "IMPORT_MERGE_CHUNK_RESULT",
         outcome,
         importBatchId: batch.id,
         receiptCode: batch.receiptCode,
         attemptId,
         sourceKey: `attempt:${attemptId}:result`,
         summary: outcome === "BLOCKED"
-          ? `${intent === "merge" ? "Merge" : "Resume"} was blocked before processing ${batch.receiptCode}.`
-          : `${intent === "merge" ? "Merge" : "Resume"} outcome requires reconciliation for ${batch.receiptCode}.`,
-        metadata: { errorCode: error instanceof MergeImportError ? error.code : "UNEXPECTED_ERROR" },
+          ? `${displayIntent} was blocked before processing ${batch.receiptCode}.`
+          : `${displayIntent} outcome requires reconciliation for ${batch.receiptCode}.`,
+        metadata: { approvalId: approvalId ?? null, errorCode: error instanceof MergeImportError ? error.code : "UNEXPECTED_ERROR" },
       }, prisma);
-      return {
-        error:
-          error instanceof MergeImportError
-            ? error.message
-            : "The import could not be completed safely. Refresh to inspect its persisted status before retrying.",
-      } satisfies ActionData;
+      return { error: error instanceof MergeImportError
+        ? error.message
+        : "The import could not be completed safely. Refresh to inspect its persisted status before retrying." } satisfies ActionData;
     }
   }
 
@@ -766,7 +849,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   let fileBytes: ArrayBuffer;
   try {
     fileBytes = await file.arrayBuffer();
-    source = new TextDecoder("utf-8", { fatal: true }).decode(fileBytes);
+    source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(fileBytes);
   } catch {
     return { error: "The CSV file must use valid UTF-8 text encoding." } satisfies ActionData;
   }
@@ -915,6 +998,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       submissionId,
       fileName: file.name,
       checksum: createHash("sha256").update(Buffer.from(fileBytes)).digest("hex"),
+      originalCsv: source,
       location: { id: location.id, name: location.name },
       currencyCode: context.currencyCode,
       lines: preparedRows.map((row) => resultLineFromPrepared(row, randomUUID())),
@@ -1118,7 +1202,7 @@ export default function Imports() {
             <div className="stockhub-guidance-card">
               <s-text type="strong">Before you upload</s-text>
               <s-paragraph>Required columns: <code>sku</code>, <code>quantity</code>. New products also need <code>title</code> and <code>price</code>. Optional columns: <code>description</code>, <code>image_url</code>.</s-paragraph>
-              <s-paragraph>Maximum {MAX_CSV_BYTES.toLocaleString()} bytes and {MAX_CSV_ROWS} data rows. A maximum of {data.maxMergeLines} lines can be merged at once.</s-paragraph>
+              <s-paragraph>Maximum {MAX_CSV_BYTES.toLocaleString()} bytes and {MAX_CSV_ROWS.toLocaleString()} data rows. Inventory changes run in server-bounded chunks of up to {data.maxMergeLines} rows after one explicit confirmation; do not split a larger file.</s-paragraph>
               <div className="stockhub-guidance-note">
                 <strong>Validation safety:</strong> Validating does not modify products or inventory in Shopify. A receipt is generated for your review first.
               </div>

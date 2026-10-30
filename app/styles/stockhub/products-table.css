@@ -1,0 +1,299 @@
+
+.stockhub-product-row:hover {
+  background: #f8faff;
+}
+
+.stockhub-products-table td.stockhub-product-price,
+.stockhub-products-table td.stockhub-product-inventory { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.stockhub-product-identity {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.stockhub-product-identity img,
+.stockhub-product-placeholder {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border: 1px solid var(--stockhub-border);
+  border-radius: 8px;
+  background: #eef3fb;
+  color: var(--stockhub-brand-primary);
+  font-size: 18px;
+  font-weight: 700;
+  object-fit: cover;
+}
+
+.stockhub-product-identity-text {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.stockhub-product-identity-text strong {
+  display: block;
+  overflow: hidden;
+  color: var(--stockhub-ink);
+  font-weight: 600;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stockhub-product-identity-text span,
+.stockhub-products-table small {
+  color: var(--stockhub-muted);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.stockhub-products-table td:nth-child(2) small {
+  display: block;
+  margin-top: 2px;
+}
+
+.stockhub-product-sku {
+  font-weight: 600;
+}
+
+.stockhub-product-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.stockhub-product-status--active { background: #e8f5ed; color: var(--stockhub-success); }
+.stockhub-product-status--unlisted { background: #fff5dc; color: var(--stockhub-warning); }
+.stockhub-product-status--neutral { background: #edf1f5; color: var(--stockhub-muted); }
+
+.stockhub-product-price,
+.stockhub-product-inventory {
+  color: var(--stockhub-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.stockhub-product-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  white-space: nowrap;
+}
+
+.stockhub-product-actions button {
+  border: 0;
+  background: none;
+  color: var(--stockhub-brand-primary);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+}
+
+.stockhub-product-actions button:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.stockhub-product-actions button:focus-visible {
+  outline: 3px solid var(--stockhub-brand-secondary);
+  outline-offset: 3px;
+}
+
+.stockhub-product-detail-row td {
+  padding: 0 20px 16px;
+  border-bottom: 1px solid var(--stockhub-border);
+}
+
+.stockhub-product-detail-content {
+  border-inline-start: 3px solid var(--stockhub-brand-secondary);
+  border-radius: 0 8px 8px 0;
+  background: var(--stockhub-canvas);
+  padding: 12px 16px;
+}
+
+.stockhub-product-detail-content h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.stockhub-product-variant-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.stockhub-product-variant {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border: 1px solid var(--stockhub-border);
+  border-radius: 8px;
+  background: var(--stockhub-surface);
+  padding: 10px 12px;
+  color: var(--stockhub-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.stockhub-product-variant strong {
+  color: var(--stockhub-ink);
+  font-size: 14px;
+}
+
+.stockhub-product-detail-content p {
+  margin: 10px 0 0;
+  color: var(--stockhub-muted);
+  font-size: 13px;
+}
+
+.stockhub-products-state {
+  padding: 24px;
+}
+
+.stockhub-products-state p {
+  margin: 8px 0 12px;
+  color: var(--stockhub-muted);
+  font-size: 14px;
+}
+
+.stockhub-products-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--stockhub-muted);
+  font-size: 13px;
+}
+
+.stockhub-products-pagination > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stockhub-panel,
+.stockhub-hero-panel,
+.stockhub-state-panel,
+.stockhub-empty-panel,
+.stockhub-history-card,
+.stockhub-receipt-card,
+.stockhub-activity-card {
+  min-width: 0;
+}
+
+.stockhub-hero-panel {
+  border-top: 3px solid var(--stockhub-brand-primary);
+  padding-top: 6px;
+}
+
+.stockhub-actions-panel {
+  border-top: 3px solid var(--stockhub-brand-secondary);
+}
+
+.stockhub-table-panel,
+.stockhub-import-form-panel,
+.stockhub-receipt-card,
+.stockhub-history-card {
+  overflow-wrap: anywhere;
+}
+
+.stockhub-import-workspace {
+  padding-bottom: 32px;
+}
+
+.stockhub-import-content,
+.stockhub-import-new {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.stockhub-import-tabs {
+  border-bottom: 2px solid var(--stockhub-brand-soft);
+  background: linear-gradient(90deg, rgb(207 222 231 / 26%), transparent 65%);
+  border-radius: 8px 8px 0 0;
+  padding: 12px;
+}
+
+.stockhub-import-tab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stockhub-store-detail {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stockhub-store-detail > .stockhub-back-link,
+.stockhub-store-detail > .stockhub-hero-panel,
+.stockhub-store-detail > .stockhub-state-panel,
+.stockhub-store-detail > .stockhub-table-panel {
+  grid-column: 1 / -1;
+}
+
+.stockhub-store-card {
+  min-height: 150px;
+}
+
+.stockhub-history-card,
+.stockhub-receipt-card,
+.stockhub-activity-card {
+  border-top: 3px solid var(--stockhub-brand-secondary);
+  padding-top: 6px;
+}
+
+.stockhub-receipt-header {
+  margin-block: 4px 16px;
+  border: 1px solid var(--stockhub-border);
+  border-inline-start: 4px solid var(--stockhub-brand-primary);
+  border-radius: 10px;
+  background: var(--stockhub-surface);
+  padding: 16px;
+}
+
+.stockhub-draft-status-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.stockhub-draft-status-summary button {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-height: 48px;
+  padding: 10px 14px;
+  color: #202223;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #dfe3e8;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.stockhub-draft-status-summary button:focus-visible,
+.stockhub-draft-add summary:focus-visible {
+  outline: 3px solid #005bd3;
+  outline-offset: 2px;
+}
+
+.stockhub-draft-status-summary strong { font-size: 20px; }
+.stockhub-draft-status-summary button:nth-child(2) strong { color: #8a6116; }
+.stockhub-draft-status-summary button:nth-child(3) strong { color: #b42318; }
+.stockhub-draft-add { margin: 14px 0; padding: 12px; background: #f6f6f7; border-radius: 10px; }
+.stockhub-draft-add summary { cursor: pointer; font-weight: 600; }

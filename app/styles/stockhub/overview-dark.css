@@ -1,0 +1,332 @@
+body.stockhub-app-frame:has(.stockhub-overview) {
+  color-scheme: light;
+  --stockhub-brand-primary: #245d9c;
+  --stockhub-brand-secondary: #16836b;
+  --stockhub-brand-accent: #385f9b;
+  --stockhub-brand-highlight: #2c4f78;
+  --stockhub-brand-soft: #edf2f8;
+  --stockhub-canvas: #f5f7fa;
+  --stockhub-surface: #ffffff;
+  --stockhub-ink: #1f2937;
+  --stockhub-muted: #526174;
+  --stockhub-border: #dce3eb;
+  --stockhub-success: #168452;
+  --stockhub-warning: #9a6700;
+  --stockhub-error: #b42318;
+  background: var(--stockhub-canvas);
+  color: var(--stockhub-ink);
+}
+
+body.stockhub-app-frame:has(.stockhub-overview)::before {
+  height: 2px;
+  background: linear-gradient(90deg, #3b77b9, #168a74 60%, #bd8a34);
+}
+
+.stockhub-overview.stockhub-page {
+  width: min(100%, 1440px);
+  gap: 16px;
+  padding: 22px 28px 36px;
+}
+
+.stockhub-overview .stockhub-overview-header {
+  align-items: flex-end;
+  gap: 18px 24px;
+}
+
+.stockhub-overview .stockhub-overview-eyebrow {
+  color: #627389;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .08em;
+}
+
+.stockhub-overview .stockhub-overview-heading h1 {
+  margin-top: 5px;
+  color: #172b43;
+  font-size: 27px;
+  letter-spacing: -.025em;
+}
+
+.stockhub-overview .stockhub-overview-heading p {
+  max-width: 600px;
+  color: #58677a;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.stockhub-overview .stockhub-current-shop {
+  min-height: 34px;
+  margin-top: 11px;
+  border-color: #dce3eb;
+  background: #ffffff;
+  box-shadow: none;
+  color: #45576a;
+}
+
+.stockhub-overview .stockhub-current-shop strong { color: #1f2937; }
+.stockhub-overview .stockhub-current-shop-dot { background: #168452; box-shadow: 0 0 0 3px rgb(98 200 155 / 15%); }
+
+.stockhub-overview .stockhub-overview-sample-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  margin-left: 9px;
+  border: 1px solid #d6be7a;
+  border-radius: 999px;
+  background: #fff5de;
+  color: #725113;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .06em;
+  padding: 2px 8px;
+  text-transform: uppercase;
+}
+
+.stockhub-overview .stockhub-overview-header-tools {
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 0;
+}
+
+.stockhub-overview .stockhub-overview-range,
+.stockhub-overview .stockhub-chart-switch {
+  border-color: #d3dde8;
+  border-radius: 9px;
+  background: #ffffff;
+  padding: 3px;
+}
+
+.stockhub-overview .stockhub-overview-range a,
+.stockhub-overview .stockhub-chart-switch button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: #526174;
+  padding: 7px 11px;
+}
+
+.stockhub-overview .stockhub-overview-range a[aria-current="page"],
+.stockhub-overview .stockhub-chart-switch button[aria-pressed="true"] {
+  background: #e7eff9;
+  color: #174f85;
+}
+
+.stockhub-overview .stockhub-overview-demo-toggle {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  border-color: #b5c7dc;
+  background: #eff4fa;
+  color: #294c72;
+  padding-inline: 12px;
+}
+
+.stockhub-overview .stockhub-overview-demo-toggle:hover { background: #e8eff7; }
+.stockhub-overview .stockhub-overview-refresh { gap: 7px; color: #59697c; font-size: 11px; }
+.stockhub-overview .stockhub-overview-refresh a { color: #245c96; }
+
+.stockhub-overview .stockhub-overview-sample-notice {
+  width: min(100%, 720px);
+  margin: 11px 0 0;
+  border: 1px solid #ddc580;
+  border-radius: 9px;
+  background: #fff9eb;
+  color: #654e1c;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 13px;
+}
+
+.stockhub-overview .stockhub-overview-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 11px;
+}
+
+.stockhub-overview .stockhub-overview-metric {
+  min-width: 0;
+  min-height: 110px;
+  border: 1px solid #dce3eb;
+  border-top: 2px solid #627a9e;
+  border-radius: 11px;
+  background: #ffffff;
+  box-shadow: none;
+  padding: 13px 15px;
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+.stockhub-overview .stockhub-overview-metric:hover { border-color: #b4c6dc; background: #f7f9fc; }
+.stockhub-overview .stockhub-overview-metric--revenue { border-top-color: #356ead; }
+.stockhub-overview .stockhub-overview-metric--orders { border-top-color: #168671; }
+.stockhub-overview .stockhub-overview-metric--units { border-top-color: #bf8730; }
+.stockhub-overview .stockhub-overview-metric--low-stock { border-top-color: #bd3e35; }
+.stockhub-overview .stockhub-metric-label { color: #58677a; font-size: 11px; font-weight: 650; }
+.stockhub-overview .stockhub-metric-value { margin-top: 6px; color: #1f2937; font-size: 24px; line-height: 1.15; }
+.stockhub-overview .stockhub-metric-note { margin-top: 7px; color: #59697c; font-size: 10px; line-height: 1.35; }
+
+.stockhub-overview-analysis-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2.05fr) minmax(300px, 1fr);
+  align-items: stretch;
+  gap: 13px;
+}
+
+.stockhub-overview .stockhub-overview-panel {
+  min-width: 0;
+  border: 1px solid #dce3eb;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 12%);
+  padding: 17px 18px;
+}
+
+.stockhub-overview .stockhub-overview-section-heading { align-items: flex-start; gap: 12px; }
+.stockhub-overview .stockhub-overview-section-heading h2 { color: #1f2937; font-size: 15px; letter-spacing: -.01em; }
+.stockhub-overview .stockhub-overview-section-heading p { margin: 3px 0 0; color: #59697c; font-size: 11px; line-height: 1.45; }
+.stockhub-overview .stockhub-overview-panel-kicker { display: block; margin-bottom: 4px; color: #60758d; font-size: 9px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+.stockhub-overview .stockhub-overview-section-heading a { color: #1e5a96; font-size: 11px; white-space: nowrap; }
+.stockhub-overview .stockhub-overview-analytics-heading { margin-bottom: 7px; }
+.stockhub-overview .stockhub-overview-analytics-heading h2 { font-size: 16px; }
+.stockhub-overview .stockhub-chart-switch button { min-height: 36px; font-size: 11px; padding-inline: 9px; }
+.stockhub-overview .stockhub-chart-measure-label { margin-top: 8px; color: #58677a; font-size: 10px; font-weight: 550; }
+.stockhub-overview .stockhub-overview-trend { display: flex; flex-direction: column; }
+.stockhub-overview .stockhub-chart-layout {
+  flex: 1 1 auto;
+  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 7px;
+  min-height: 190px;
+}
+.stockhub-overview .stockhub-chart-y-axis { min-height: 0; height: 100%; color: #59697c; font-size: 9px; }
+.stockhub-overview .stockhub-chart-visual { display: flex; flex-direction: column; }
+.stockhub-overview .stockhub-chart-gridline { stroke: #e1e7ee; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.stockhub-overview .stockhub-chart-area { opacity: .18; }
+.stockhub-overview .stockhub-chart-area--revenue { fill: #8ab2e8; }
+.stockhub-overview .stockhub-chart-area--orders { fill: #6db7a2; }
+.stockhub-overview .stockhub-chart-area--units { fill: #d5b46a; }
+.stockhub-overview .stockhub-chart-line { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.stockhub-overview .stockhub-chart-line--revenue { stroke: #245da1; }
+.stockhub-overview .stockhub-chart-line--orders { stroke: #16836b; }
+.stockhub-overview .stockhub-chart-line--units { stroke: #8d6000; }
+.stockhub-overview .stockhub-chart-point { stroke: #ffffff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.stockhub-overview .stockhub-chart-point--revenue { fill: #315f9e; }
+.stockhub-overview .stockhub-chart-point--orders { fill: #176c5b; }
+.stockhub-overview .stockhub-chart-point--units { fill: #785100; }
+.stockhub-overview .stockhub-chart-x-axis { min-height: 17px; color: #59697c; font-size: 9px; }
+.stockhub-overview .stockhub-chart-plot:focus-visible { outline: 3px solid #1e5ea8; outline-offset: 2px; }
+.stockhub-overview .stockhub-chart-bar-track:focus-visible,
+.stockhub-overview :where(a, button):focus-visible { outline: 3px solid #1e5ea8; outline-offset: 2px; }
+.stockhub-overview .stockhub-analytics-notice { border-color: #b9cde3; background: #eef5fc; color: #24476b; font-size: 11px; }
+.stockhub-overview .stockhub-analytics-notice--partial { border-color: #d7bc70; background: #fff5e0; color: #624300; }
+.stockhub-overview .stockhub-analytics-notice--error { border-color: #e3aaa5; background: #fff1ef; color: #8d2118; }
+.stockhub-overview .stockhub-analytics-empty { min-height: 120px; border-color: #cbd5e1; color: #59697c; }
+.stockhub-overview .stockhub-overview-ranking { gap: 0; }
+.stockhub-overview .stockhub-overview-ranking li { gap: 10px; min-height: 57px; border-color: #e1e7ee; padding: 8px 0; }
+.stockhub-overview .stockhub-overview-ranking > li > img,
+.stockhub-overview .stockhub-ranking-image-placeholder { width: 34px; height: 34px; flex-basis: 34px; border: 1px solid #d3dde8; border-radius: 8px; background: #f5f7fa; color: #59697c; }
+.stockhub-overview .stockhub-overview-ranking-copy { gap: 2px; }
+.stockhub-overview .stockhub-overview-ranking-copy strong { color: #253347; font-size: 11px; line-height: 1.35; }
+.stockhub-overview .stockhub-overview-ranking-copy a { color: #285d95; }
+.stockhub-overview .stockhub-overview-ranking-copy > span { color: #59697c; font-size: 9px; line-height: 1.35; }
+.stockhub-overview .stockhub-overview-ranking-value { color: #27374a; font-size: 11px; white-space: nowrap; }
+.stockhub-overview .stockhub-overview-ranking-value small { display: block; color: #59697c; font-size: 9px; font-weight: 500; }
+.stockhub-overview .stockhub-ranking-switch { flex: none; }
+.stockhub-overview .stockhub-overview-best-sellers { display: flex; flex-direction: column; }
+.stockhub-overview .stockhub-overview-best-sellers .stockhub-overview-ranking { margin-top: 4px; }
+.stockhub-overview .stockhub-overview-message { color: #526174; font-size: 12px; line-height: 1.5; }
+
+.stockhub-overview .stockhub-overview-attention-list {
+  display: grid;
+  gap: 0;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stockhub-overview .stockhub-overview-attention-list li {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(100px, auto) minmax(105px, auto) minmax(105px, auto);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  border-top: 1px solid #e1e7ee;
+  padding: 10px 0;
+}
+
+.stockhub-overview .stockhub-overview-attention-list li:first-child { border-top: 0; }
+.stockhub-overview .stockhub-attention-product { display: flex; min-width: 0; align-items: flex-start; gap: 9px; }
+.stockhub-overview .stockhub-attention-product > div { display: grid; min-width: 0; gap: 2px; }
+.stockhub-overview .stockhub-attention-product a { overflow-wrap: anywhere; color: #2b3b50; font-size: 11px; font-weight: 650; text-decoration: none; }
+.stockhub-overview .stockhub-attention-product span:not(.stockhub-attention-dot) { overflow-wrap: anywhere; color: #59697c; font-size: 9px; line-height: 1.4; }
+.stockhub-overview .stockhub-attention-dot { width: 8px; height: 8px; flex: none; margin-top: 4px; border-radius: 50%; background: #a55b00; }
+.stockhub-overview .stockhub-attention-dot--out { background: #b42318; }
+.stockhub-overview .stockhub-attention-status { width: fit-content; border: 1px solid #d7be70; border-radius: 999px; background: #fff4d9; color: #765600; font-size: 9px; font-weight: 700; padding: 4px 8px; }
+.stockhub-overview .stockhub-attention-status--out { border-color: #e4b1ab; background: #fff1ef; color: #8d2118; }
+.stockhub-overview .stockhub-attention-stock { color: #1f2937; font-size: 11px; white-space: nowrap; }
+.stockhub-overview .stockhub-attention-stock small { color: #59697c; font-size: 9px; font-weight: 500; }
+.stockhub-overview .stockhub-attention-velocity { color: #59697c; font-size: 10px; text-align: right; }
+.stockhub-overview .stockhub-overview-metric-note { margin: 7px 0 0; color: #59697c; font-size: 9px; line-height: 1.5; }
+.stockhub-overview .stockhub-overview-recent { padding-block: 14px; }
+.stockhub-overview .stockhub-overview-import-list { margin-top: 6px; }
+.stockhub-overview .stockhub-overview-import-list li { min-height: 48px; border-color: #e1e7ee; padding: 6px 0; }
+.stockhub-overview .stockhub-overview-import-primary { flex: 1 1 auto; min-width: 0; text-decoration: none; }
+.stockhub-overview .stockhub-overview-import-primary strong { color: #2b3b50; font-size: 11px; }
+.stockhub-overview .stockhub-overview-import-primary span { color: #59697c; font-size: 9px; }
+.stockhub-overview .stockhub-overview-import-primary:hover strong { color: #194f88; }
+.stockhub-overview .stockhub-status { min-height: 24px; border: 1px solid transparent; font-size: 9px; }
+.stockhub-overview .stockhub-status--success { border-color: #a8d5bd; background: #e8f5ee; color: #1f6b45; }
+.stockhub-overview .stockhub-status--warning { border-color: #d9c276; background: #fff6e2; color: #735300; }
+.stockhub-overview .stockhub-status--error { border-color: #e2b4ae; background: #fff1ef; color: #8d2118; }
+.stockhub-overview .stockhub-status--info { border-color: #b8c9dd; background: #eef4fb; color: #385675; }
+
+@media (max-width: 1000px) {
+  .stockhub-overview-analysis-grid { grid-template-columns: minmax(0, 1fr); }
+  .stockhub-overview .stockhub-overview-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stockhub-overview .stockhub-overview-best-sellers .stockhub-overview-ranking li { min-height: 52px; }
+}
+
+@media (max-width: 700px) {
+  .stockhub-overview.stockhub-page { gap: 13px; padding: 16px 14px 26px; }
+  .stockhub-overview .stockhub-overview-header { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .stockhub-overview .stockhub-overview-header-tools { justify-content: flex-start; width: 100%; }
+  .stockhub-overview .stockhub-overview-refresh { flex: 1 1 100%; justify-content: space-between; }
+  .stockhub-overview .stockhub-overview-attention-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; }
+  .stockhub-overview .stockhub-attention-product { grid-column: 1 / -1; }
+  .stockhub-overview .stockhub-attention-velocity { text-align: left; }
+}
+
+@media (max-width: 480px) {
+  .stockhub-overview.stockhub-page { padding-inline: 12px; }
+  .stockhub-overview .stockhub-overview-heading h1 { font-size: 24px; }
+  .stockhub-overview .stockhub-overview-heading p { max-width: 340px; font-size: 12px; }
+  .stockhub-overview .stockhub-overview-header-tools { gap: 7px; }
+  .stockhub-overview .stockhub-overview-range { flex: 0 0 auto; }
+  .stockhub-overview .stockhub-overview-range a { min-height: 42px; padding-inline: 9px; }
+  .stockhub-overview .stockhub-overview-demo-toggle { min-height: 42px; padding-inline: 9px; font-size: 11px; }
+  .stockhub-overview .stockhub-overview-metrics { gap: 8px; }
+  .stockhub-overview .stockhub-overview-metric { min-height: 104px; padding: 10px; }
+  .stockhub-overview .stockhub-metric-value { font-size: 19px; overflow-wrap: anywhere; }
+  .stockhub-overview .stockhub-metric-note { font-size: 9px; }
+  .stockhub-overview .stockhub-overview-panel { padding: 13px; }
+  .stockhub-overview .stockhub-overview-analytics-heading { flex-direction: column; gap: 8px; }
+  .stockhub-overview .stockhub-overview-analytics-heading .stockhub-chart-switch { max-width: 100%; }
+  .stockhub-overview .stockhub-chart-switch button { min-height: 40px; padding-inline: 10px; }
+  .stockhub-overview .stockhub-chart-layout { grid-template-columns: 50px minmax(0, 1fr); gap: 5px; }
+  .stockhub-overview .stockhub-chart-y-axis { min-height: 150px; height: auto; font-size: 8px; }
+  .stockhub-overview .stockhub-chart-x-axis { font-size: 8px; }
+  .stockhub-overview .stockhub-overview-import-list li { align-items: center; gap: 9px; }
+  .stockhub-overview .stockhub-overview-import-primary { flex-basis: 100%; }
+  .stockhub-overview .stockhub-status { margin-left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stockhub-overview *, .stockhub-overview *::before, .stockhub-overview *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

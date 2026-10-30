@@ -6,6 +6,8 @@ import ts from "typescript";
 
 const detailRoute = new URL("../app/routes/app.imports.history.$batchId.tsx", import.meta.url);
 const overviewComponent = new URL("../app/components/OverviewDashboard.tsx", import.meta.url);
+const attentionComponent = new URL("../app/components/overview/InventoryAttention.tsx", import.meta.url);
+const recentImportsComponent = new URL("../app/components/overview/RecentImports.tsx", import.meta.url);
 
 async function loadPureFunction(source, startMarker, endMarker, exportName) {
   const start = source.indexOf(startMarker);
@@ -121,15 +123,17 @@ test("delete keeps an explicit destructive confirmation and a safe cancel path",
   assert.match(confirmation, />Cancel</);
 });
 
-test("Overview defines attention as execution outcomes and distinguishes Previewed validation errors", async () => {
-  const source = await readFile(overviewComponent, "utf8");
-  const attentionStart = source.indexOf('className="stockhub-overview-section stockhub-overview-panel stockhub-overview-attention"');
-  const recentStart = source.indexOf('className="stockhub-overview-section stockhub-overview-panel stockhub-overview-recent"', attentionStart);
-  assert.ok(attentionStart >= 0 && recentStart > attentionStart, "Overview attention panel should remain separate from recent receipts");
-  const attentionPanel = source.slice(attentionStart, recentStart);
+test("Overview keeps inventory attention separate and explains Previewed import lifecycle truthfully", async () => {
+  const [dashboard, attention, recentImports] = await Promise.all([
+    readFile(overviewComponent, "utf8"),
+    readFile(attentionComponent, "utf8"),
+    readFile(recentImportsComponent, "utf8"),
+  ]);
 
-  assert.match(attentionPanel, /execution|mutation/i,
-    "the panel should scope attention counts to execution outcomes, not draft validation");
-  assert.match(attentionPanel, /Previewed[\s\S]{0,160}(?:validation|draft)[\s\S]{0,160}(?:not|does not)[\s\S]{0,100}(?:failed|failure|Shopify write|mutation)/i,
-    "the empty or explanatory state should make clear that Previewed validation errors are not failed Shopify mutations");
+  assert.match(dashboard, /<InventoryAttention analytics=\{analytics\} \/>[\s\S]*?<RecentImports imports=\{imports\} \/>/,
+    "Overview attention and recent imports remain separate, ordered panels");
+  assert.match(attention, /Unknown and untracked inventory is excluded, never treated as zero/,
+    "attention must not treat unknown physical inventory as zero");
+  assert.match(recentImports, /Previewed is validation only; it does not mean a failed Shopify mutation/,
+    "Previewed validation must not be presented as a failed Shopify mutation");
 });

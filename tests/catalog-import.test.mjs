@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { resolve } from "node:path";
 import { createServer } from "vite";
+import { MAX_CSV_BYTES } from "../app/utils/csv-limits.js";
 import { suggestCatalogField } from "../app/utils/catalog-import.shared.ts";
 
 const vite = await createServer({
@@ -101,4 +102,62 @@ test("upload parser rejects malformed CSV structure and validates extension", ()
   const malformedRow = parseCatalogCsv("Name,SKU\nHat\n").rows[0];
   assert.match(malformedRow.sourceErrors.join(" "), /row 2 has 1 cells; expected 2/i);
   assert.throws(() => validateCatalogUpload("supplier.txt", "Name,SKU\nHat,HAT-1\n"), /\.csv/i);
+});
+
+test("Catalog accepts and normalizes 1,000 source rows without losing row identity or malformed-row accounting", () => {
+  const sourceRows = Array.from({ length: 1000 }, (_, index) => {
+    const productNumber = Math.floor(index / 4) + 1;
+    const variant = ["S", "M", "L", "XL"][index % 4];
+    const cells = [
+      `Style ${productNumber}`,
+      `STYLE-${String(index + 1).padStart(4, "0")}`,
+      `GROUP-${String(productNumber).padStart(3, "0")}`,
+      variant,
+      "Blue",
+    ];
+    // Keep a malformed but non-empty source row in the accepted dataset. It
+    // must remain reviewable instead of being dropped during parsing.
+    if (index === 500) cells.pop();
+    return cells.join(",");
+  });
+  const csvText = `Product Name,SKU,Product Group Code,Size,Color\n${sourceRows.join("\n")}`;
+  const parsed = validateCatalogUpload("capacity.csv", csvText);
+  const normalized = normalizeCatalogRows(parsed, {
+    0: "productName",
+    1: "sku",
+    2: "productGroupCode",
+    3: "size",
+    4: "color",
+  });
+
+  assert.equal(MAX_CSV_BYTES, 1_000_000, "the larger row limit must not remove the independent upload byte ceiling");
+  assert.ok(Buffer.byteLength(csvText, "utf8") < MAX_CSV_BYTES, "the 1,000-row fixture stays under the existing byte ceiling");
+  assert.equal(parsed.rows.length, 1000);
+  assert.equal(normalized.length, 1000, "all source rows, including errors, must be accounted for");
+  assert.equal(normalized[0].rowNumber, 2);
+  assert.deepEqual(normalized[0].sourceValues, ["Style 1", "STYLE-0001", "GROUP-001", "S", "Blue"]);
+  assert.equal(normalized[0].normalized.productGroupCode, "GROUP-001");
+  assert.equal(normalized.at(-1).rowNumber, 1001);
+  assert.equal(normalized.at(-1).normalized.sku, "STYLE-1000");
+  assert.equal(normalized[500].rowNumber, 502);
+  assert.deepEqual(normalized[500].sourceValues, ["Style 126", "STYLE-0501", "GROUP-126", "S"]);
+  assert.match(normalized[500].errors.join(" "), /row 502 has 4 cells; expected 5/i);
+  assert.equal(normalized.filter((row) => row.status === "ERROR").length, 1);
+  assert.equal(new Set(normalized.map((row) => row.rowNumber)).size, 1000);
+});
+
+test("Catalog rejects 1,001 data rows rather than silently truncating the source", () => {
+  const rows = Array.from({ length: 1001 }, (_, index) => `Hat ${index + 1},HAT-${index + 1}`);
+  assert.throws(
+    () => validateCatalogUpload("too-many.csv", `Product Name,SKU\n${rows.join("\n")}`),
+    /1,000|1000|row limit/i,
+  );
+});
+
+test("Catalog preserves the independent one-megabyte UTF-8 upload ceiling", () => {
+  const oversized = `x`.repeat(MAX_CSV_BYTES + 1);
+  assert.throws(
+    () => validateCatalogUpload("oversized.csv", oversized),
+    /1,000,000|1,000,000 bytes/i,
+  );
 });

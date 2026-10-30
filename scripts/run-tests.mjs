@@ -40,8 +40,11 @@ let testSchema = sourceSchema
   .replace('provider = "postgresql"', 'provider = "sqlite"')
   .replace('url      = env("DATABASE_URL")', 'url      = "file:dev.sqlite"');
 
-// SQLite does not support the catalog models' PostgreSQL native annotations.
-// Remove them only from the derived test schema; keep prisma/schema.prisma intact.
+// SQLite does not support the PostgreSQL native annotations used for larger
+// persisted source/snapshot payloads and catalog data. Remove them only from
+// the derived test schema; keep prisma/schema.prisma intact.
+testSchema = rewriteModelNativeTypes(testSchema, "ImportBatch", [["@db.Text", "", 1]]);
+testSchema = rewriteModelNativeTypes(testSchema, "ImportMergeApproval", [["@db.Text", "", 1]]);
 testSchema = rewriteModelNativeTypes(testSchema, "CatalogImportBatch", [["@db.Text", "", 1]]);
 testSchema = rewriteModelNativeTypes(testSchema, "CatalogImportLine", [["@db.Decimal(20, 6)", "", 1], ["@db.Text", "", 1]]);
 testSchema = rewriteModelNativeTypes(testSchema, "CatalogImportGroup", [["@db.Text", "", 1]]);
@@ -49,7 +52,7 @@ testSchema = rewriteModelNativeTypes(testSchema, "CatalogExecutionOperation", [[
 testSchema = rewriteModelNativeTypes(testSchema, "CatalogExecutionItem", [["@db.Text", "", 1]]);
 testSchema = rewriteModelNativeTypes(testSchema, "CatalogExecutionAttempt", [["@db.Text", "", 1]]);
 
-for (const modelName of ["CatalogImportBatch", "CatalogImportLine", "CatalogImportGroup", "CatalogImportReview", "CatalogExecutionOperation", "CatalogExecutionItem", "CatalogExecutionAttempt"]) {
+for (const modelName of ["ImportBatch", "ImportMergeApproval", "CatalogImportBatch", "CatalogImportLine", "CatalogImportGroup", "CatalogImportReview", "CatalogExecutionOperation", "CatalogExecutionItem", "CatalogExecutionAttempt"]) {
   const modelPattern = new RegExp(`(model ${modelName} \\{[\\s\\S]*?\\n\\})`);
   const model = testSchema.match(modelPattern)?.[1];
   if (!model) throw new Error(`Could not find ${modelName} in the derived SQLite test schema`);
