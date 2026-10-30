@@ -1,26 +1,41 @@
-import { getGraphQLData } from "./shopify-graphql.server";
-
-export type SizeGuideProduct = { id: string; title: string };
+export type SizeGuideProduct = { id: string; title: string; imageUrl?: string | null };
 type ProductAdmin = { graphql: (query: string, options: { variables: Record<string, unknown> }) => Promise<Response> };
+type ProductNodesResponse = {
+  data?: { nodes?: Array<(SizeGuideProduct & { featuredImage?: { url?: string | null } | null }) | null> };
+  errors?: Array<{ message?: string; extensions?: { code?: string } }>;
+};
 
-export async function searchSizeGuideProducts(admin: ProductAdmin, search: string): Promise<SizeGuideProduct[]> {
-  if (search.length < 2) return [];
-  const query = `#graphql
-    query StockHubSizeGuideProductSearch($query: String!) {
-      products(first: 20, query: $query, sortKey: TITLE) {
-        nodes { id title }
-      }
-    }`;
-  const data = await getGraphQLData<{ products: { nodes: SizeGuideProduct[] } }>(await admin.graphql(query, {
-    variables: { query: `title:${JSON.stringify(search)}` },
-  }));
-  return data.products.nodes;
+export class SizeGuideProductLookupError extends Error {
+  constructor(readonly errorType: "permission" | "api") {
+    super(errorType === "permission" ? "Shopify product access was denied." : "Shopify products could not be verified.");
+    this.name = "SizeGuideProductLookupError";
+  }
 }
 
-export async function getSizeGuideProduct(admin: ProductAdmin, id: string): Promise<SizeGuideProduct | null> {
-  const data = await getGraphQLData<{ node: SizeGuideProduct | null }>(await admin.graphql(`#graphql
-    query StockHubSizeGuideProduct($id: ID!) {
-      node(id: $id) { ... on Product { id title } }
-    }`, { variables: { id } }));
-  return data.node;
+/** Verify all picker IDs in one authenticated Admin API read; never trust client titles. */
+export async function getSizeGuideProductsByIds(admin: ProductAdmin, ids: string[]): Promise<SizeGuideProduct[]> {
+  let response: Response;
+  try {
+    response = await admin.graphql(`#graphql
+      query StockHubSizeGuideProducts($ids: [ID!]!) {
+        nodes(ids: $ids) { ... on Product { id title featuredImage { url } } }
+      }`, { variables: { ids } });
+  } catch {
+    throw new SizeGuideProductLookupError("api");
+  }
+
+  let body: ProductNodesResponse;
+  try { body = await response.json() as ProductNodesResponse; }
+  catch { throw new SizeGuideProductLookupError(response.status === 401 || response.status === 403 ? "permission" : "api"); }
+  const denied = response.status === 401 || response.status === 403 || body.errors?.some((error) => {
+    const code = error.extensions?.code?.toUpperCase();
+    return code === "ACCESS_DENIED" || code === "FORBIDDEN" || /access denied|permission/i.test(error.message ?? "");
+  });
+  if (denied) throw new SizeGuideProductLookupError("permission");
+  if (!response.ok || body.errors?.length || !body.data?.nodes) throw new SizeGuideProductLookupError("api");
+  return body.data.nodes.flatMap((node) => node ? [{
+    id: node.id,
+    title: node.title,
+    imageUrl: node.featuredImage?.url ?? null,
+  }] : []);
 }

@@ -340,3 +340,5 @@ export async function deleteSizeGuide(shop: string, guideId: string): Promise<bo
       AND NOT EXISTS (SELECT 1 FROM "SizeGuideProduct" p WHERE p."shop" = g."shop" AND p."guideId" = g."id")`;
   return count > 0;
 }
+
+export { assignSizeGuideProducts } from "./size-guide-assignment-repository.server";

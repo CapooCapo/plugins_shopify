@@ -1,34 +1,28 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { data, redirect, useActionData, useLoaderData } from "react-router";
+import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { SizeGuideManager } from "../components/SizeGuideManager";
-import { createSizeGuide, createSizeGuideAssignment, deleteSizeGuide, getSizeGuide, getSizeGuideAssignment, listGuideAssignments, listOrphanedSizeGuideSyncLocks, listSizeGuides, saveSizeGuide } from "../utils/size-guide-repository.server";
-import { getSizeGuideProduct, searchSizeGuideProducts } from "../utils/size-guide-products.server";
-import type { SizeGuideProduct } from "../utils/size-guide-products.server";
+import { assignSizeGuideProducts, createSizeGuide, deleteSizeGuide, getSizeGuide, getSizeGuideAssignment, listGuideAssignments, listOrphanedSizeGuideSyncLocks, listSizeGuides, saveSizeGuide } from "../utils/size-guide-repository.server";
+import { getSizeGuideProductsByIds, SizeGuideProductLookupError } from "../utils/size-guide-products.server";
+import type { SizeGuideResourcePicker, SizeGuideResourcePickerOptions } from "../components/SizeGuideManager";
 import { validateSizeGuideDraft } from "../utils/size-guides.shared";
 import { removeSizeGuideAssignment, retryOrphanedSizeGuideCleanup, retrySizeGuideRemoval, retrySizeGuideSync, syncSizeGuideAssignment } from "../utils/size-guide-sync.server";
 
 const PRODUCT_ID = /^gid:\/\/shopify\/Product\/\d+$/;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
   const url = new URL(request.url);
-  const query = (url.searchParams.get("q") ?? "").trim().slice(0, 100);
   try {
     const guides = await listSizeGuides(session.shop);
     const cleanupLocks = await listOrphanedSizeGuideSyncLocks(session.shop);
     const requested = url.searchParams.get("guide");
     const selectedGuideId = guides.some((guide) => guide.id === requested) ? requested : guides[0]?.id ?? null;
-    let products: SizeGuideProduct[] = [];
-    let productError = null;
-    if (query.length >= 2) {
-      try { products = await searchSizeGuideProducts(admin, query); }
-      catch { productError = "Products could not be searched. Check product access and retry."; }
-    }
-    return data({ guides, selectedGuideId, query, products, productError, cleanupLocks, storageError: null });
+    return data({ guides, selectedGuideId, cleanupLocks, storageError: null });
   } catch {
-    return data({ guides: [], selectedGuideId: null, query, products: [], productError: null,
+    return data({ guides: [], selectedGuideId: null,
       cleanupLocks: [], storageError: "Size Guide storage is unavailable. Apply the M4 database migration, then reload." });
   }
 };
@@ -60,26 +54,65 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return redirect(`/app/size-guides?guide=${encodeURIComponent(id)}`);
   }
 
-  if (intent === "assign") {
-    const productId = String(form.get("productId") ?? "");
-    if (!PRODUCT_ID.test(productId)) return data({ error: "Choose a product from the search results." }, { status: 400 });
-    if (!await getSizeGuide(session.shop, guideId)) return data({ error: "Choose a guide in this store before assigning products." }, { status: 404 });
+  if (intent === "assignProducts") {
+    const rawProductIds = form.getAll("productIds").map(String);
+    const productIds = [...new Set(rawProductIds)];
+    const rawReplaceIds = form.getAll("replaceProductIds").map(String);
+    const replaceProductIds = [...new Set(rawReplaceIds)];
+    const confirmReplacements = form.get("confirmReplacements") === "yes";
+    if (!rawProductIds.length || rawProductIds.length > 250 || productIds.some((id) => !PRODUCT_ID.test(id))) {
+      return data({ error: "Choose between 1 and 250 valid products from Shopify's product picker.", errorType: "invalid" }, { status: 400 });
+    }
+    if (replaceProductIds.some((id) => !PRODUCT_ID.test(id) || !productIds.includes(id))) {
+      return data({ error: "Replacement confirmation must match products in this selection.", errorType: "invalid" }, { status: 400 });
+    }
+    if (!await getSizeGuide(session.shop, guideId)) {
+      return data({ error: "Choose a guide in this store before assigning products.", errorType: "not_found" }, { status: 404 });
+    }
+    let products: Awaited<ReturnType<typeof getSizeGuideProductsByIds>>;
     try {
-      const product = await getSizeGuideProduct(admin, productId);
-      if (!product || product.id !== productId) return data({ error: "That product is no longer available in this store." }, { status: 404 });
-      await createSizeGuideAssignment({ shop: session.shop, guideId, productId, productTitle: product.title });
-      const assigned = await listGuideAssignments(session.shop, guideId);
-      const row = assigned.find((item) => item.productId === productId);
-      if (row) await syncSizeGuideAssignment(admin, session.shop, row.id);
+      products = await getSizeGuideProductsByIds(admin, productIds);
+    } catch (error) {
+      const errorType = error instanceof SizeGuideProductLookupError ? error.errorType : "api";
+      return data({
+        error: errorType === "permission" ? "Shopify denied access to product details. Confirm product access and reauthorize if needed." :
+          "Shopify could not verify the selected products. Retry when the Admin API is available.",
+        errorType,
+      }, { status: errorType === "permission" ? 403 : 502 });
+    }
+    const productsById = new Map(products.map((product) => [product.id, product]));
+    if (productIds.some((id) => !productsById.has(id))) {
+      return data({ error: "One or more selected products are no longer available in this store. Reopen the product picker.", errorType: "product_not_found" }, { status: 404 });
+    }
+    const verifiedProducts = productIds.map((id) => ({ id, title: productsById.get(id)!.title }));
+    let result: Awaited<ReturnType<typeof assignSizeGuideProducts>>;
+    try {
+      result = await assignSizeGuideProducts({ shop: session.shop, guideId, products: verifiedProducts, replaceProductIds, confirmReplacements });
     } catch (error) {
       const message = String(error);
-      if (message.includes("SIZE_GUIDE_PRODUCT_SYNC_LOCKED")) {
-        return data({ error: "This product is reserved while an interrupted size-guide operation is being recovered. Retry recovery, then assign it again." }, { status: 409 });
+      if (/SIZE_GUIDE_PRODUCT_SYNC_LOCKED/.test(message)) {
+        return data({ error: "A selected product is reserved while an interrupted size-guide operation is being recovered. Retry recovery, then assign it again.", errorType: "locked" }, { status: 409 });
       }
-      if (/23505|P2002|SizeGuideProduct_shop_productId_key/.test(message)) {
-        return data({ error: "This product already has a size guide assigned. Remove its current assignment first." }, { status: 409 });
+      if (/23505|P2002|SIZE_GUIDE_ASSIGNMENT_RACE/.test(message)) {
+        return data({ error: "A product assignment changed during this request. Refresh the guide and try again.", errorType: "conflict" }, { status: 409 });
       }
-      return data({ error: "The product could not be assigned. Canonical guide data was not removed; retry." }, { status: 500 });
+      return data({ error: "The product mapping could not be saved. Existing guide data was retained; retry.", errorType: "storage" }, { status: 500 });
+    }
+    if (result.status === "guide_not_found") return data({ error: "This guide was not found in the authenticated store.", errorType: "not_found" }, { status: 404 });
+    if (result.status === "locked") return data({
+      error: "Some selected products are reserved while a publish or cleanup operation is active. Retry after recovery completes.",
+      errorType: "locked", lockedProductIds: result.productIds,
+    }, { status: 409 });
+    if (result.status === "replacement_confirmation_required") return data({
+      error: "Some selected products already have a different size guide. Confirm replacement for every listed product.",
+      errorType: "replacement", conflicts: result.conflicts,
+    }, { status: 409 });
+    const assigned = await listGuideAssignments(session.shop, guideId);
+    const unchanged = new Set(result.unchangedProductIds);
+    for (const product of verifiedProducts) {
+      if (unchanged.has(product.id)) continue;
+      const row = assigned.find((item) => item.productId === product.id);
+      if (row) await syncSizeGuideAssignment(admin, session.shop, row.id);
     }
     return redirect(`/app/size-guides?guide=${encodeURIComponent(guideId)}`);
   }
@@ -128,10 +161,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return data({ error: "Unsupported Size Guide action." }, { status: 400 });
 };
 
+type SizeGuideActionFeedback = {
+  error?: string;
+  errorType?: string;
+  conflicts?: Array<{ productId: string; currentGuideId: string }>;
+  lockedProductIds?: string[];
+};
+
 export default function SizeGuidesRoute() {
   const data = useLoaderData<typeof loader>();
-  const actionData = useActionData<typeof action>();
-  return <s-page inlineSize="large"><SizeGuideManager {...data} actionError={actionData?.error ?? null} /></s-page>;
+  const actionData = useActionData<typeof action>() as SizeGuideActionFeedback | undefined;
+  const shopify = useAppBridge();
+  const resourcePicker: SizeGuideResourcePicker = (options: SizeGuideResourcePickerOptions) => shopify.resourcePicker(options);
+  return <s-page inlineSize="large"><SizeGuideManager {...data} resourcePicker={resourcePicker}
+    actionError={actionData?.error ?? null} actionErrorType={actionData?.errorType ?? null}
+    actionConflicts={actionData?.conflicts ?? []} lockedProductIds={actionData?.lockedProductIds ?? []} /></s-page>;
 }
 
 export const headers: HeadersFunction = (args) => boundary.headers(args);

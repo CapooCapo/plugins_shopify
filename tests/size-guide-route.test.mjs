@@ -58,9 +58,9 @@ test("Size Guide action rejects invalid measurement and untrusted product IDs be
   assert.match(invalidChart.data.error, /positive finite/);
 
   const invalidProduct = await route.action({ request: new Request("http://localhost/app/size-guides", {
-    method: "POST", body: new URLSearchParams({ intent: "assign", guideId: "unknown", productId: "not-a-shopify-product" }),
+    method: "POST", body: new URLSearchParams({ intent: "assignProducts", guideId: "unknown", productIds: "not-a-shopify-product" }),
   }), params: {}, context: {} });
   assert.equal(invalidProduct.init.status, 400);
-  assert.match(invalidProduct.data.error, /search results/);
+  assert.match(invalidProduct.data.error, /valid products from Shopify's product picker/);
   assert.deepEqual(calls, [], "invalid chart or product input cannot call Shopify");
 });
