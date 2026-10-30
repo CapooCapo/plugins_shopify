@@ -31,6 +31,8 @@ export type SalesAggregationOptions = {
   currencyCode: string;
   timeZone: string;
   dates: string[];
+  /** Daily reference rate per shop-local date: source currency units to USD. */
+  usdRatesByDate?: Map<string, Record<string, number>>;
   /** True when the API adapter could not retrieve all pages. */
   partial?: boolean;
   /** Include product/variant display identity for Restock Planner rows. */

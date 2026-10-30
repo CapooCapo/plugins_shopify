@@ -26,8 +26,8 @@ function readyAnalytics(range: 7 | 30): OverviewAnalytics {
   const base = createSampleOverviewAnalytics(range, "America/New_York", now);
   return {
     ...base,
-    currencyCode: "CAD",
-    sales: { ...base.sales, status: "ready", data: { ...base.sales.data!, currencyCode: "CAD" } },
+    currencyCode: "USD",
+    sales: { ...base.sales, status: "ready", data: { ...base.sales.data!, currencyCode: "USD" } },
     inventory: { ...base.inventory, status: "ready" },
   };
 }

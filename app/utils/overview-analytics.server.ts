@@ -134,7 +134,7 @@ export async function loadOverviewAnalytics(input: {
       ? Promise.resolve(section<SalesAggregation>("unavailable", null, "Shop-local time zone or shop currency is unavailable, so sales metrics cannot be calculated safely."))
       : cached?.sales && cached.sales.data.status === "ready"
         ? Promise.resolve(section<SalesAggregation>("ready", cached.sales.data, undefined, cached.sales.fetchedAt))
-      : readSalesOrders(input.admin, window, zone, currencyCode, input.signal)
+      : readSalesOrders(input.admin, window, zone, currencyCode, input.signal, { convertToUsd: true })
           .then((data) => section<SalesAggregation>(data.status, data, data.reason))
           .catch((error: unknown) => section<SalesAggregation>("unavailable", null,
             error instanceof Error ? error.message : "Shopify sales data could not be loaded. Try again shortly."));

@@ -14,12 +14,12 @@ function Metric({ label, value, note, accent }: { label: string; value: string; 
 export function OverviewMetrics({ analytics, samplePreview }: Props) {
   const sales = analytics.sales.data;
   const inventory = analytics.inventory.data;
-  const currencyCode = samplePreview ? "USD" : sales?.currencyCode ?? analytics.currencyCode;
+  const currencyCode = "USD";
   const lowStock = inventory
     ? `${analytics.inventory.status === "partial" ? "Observed " : ""}${numberLabel(inventory.lowStockSkuCount)}`
     : "Unavailable";
   return <section className="stockhub-overview-metrics stockhub-overview-sales-metrics" aria-label="Store performance summary">
-    <Metric accent="revenue" label="Net merchandise sales" value={currencyLabel(sales?.totals.revenue, currencyCode)} note="After discounts and returns · before tax" />
+    <Metric accent="revenue" label="Net merchandise sales" value={currencyLabel(sales?.totals.revenue, currencyCode)} note={samplePreview ? "USD sample · after discounts and returns · before tax" : "USD equivalent · daily reference rates · after discounts and returns · before tax"} />
     <Metric accent="orders" label="Orders" value={sales ? numberLabel(sales.totals.orders) : "Unavailable"} note="Non-cancelled, non-test orders" />
     <Metric accent="units" label="Units sold" value={sales ? numberLabel(sales.totals.units) : "Unavailable"} note="Net units after returns" />
     <Metric accent="low-stock" label="Low-stock SKUs" value={lowStock} note="≤ 5 available across active locations" />

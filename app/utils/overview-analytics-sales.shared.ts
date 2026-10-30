@@ -26,6 +26,19 @@ function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 10000) / 10000;
 }
 
+function rateForDate(ratesByDate: Map<string, Record<string, number>>, currencyCode: string, date: string) {
+  let nearestDate: string | null = null;
+  let rate: number | null = null;
+  for (const [rateDate, rates] of ratesByDate) {
+    const candidate = rates[currencyCode];
+    if (rateDate <= date && rateDate > (nearestDate ?? "") && Number.isFinite(candidate) && candidate > 0) {
+      nearestDate = rateDate;
+      rate = candidate;
+    }
+  }
+  return rate;
+}
+
 /**
  * Aggregates non-cancelled, non-test orders. Shopify currentQuantity and
  * priceAfterAllDiscountsBeforeTaxesSet already reflect returns/refunds and
@@ -48,6 +61,8 @@ export function aggregateSalesOrders(
   let revenueTotal = 0;
   let currencyMismatch = false;
   let revenueIncomplete = false;
+  let fxIncomplete = false;
+  const convertToUsd = options.currencyCode === "USD" || options.usdRatesByDate !== undefined;
   let partial = options.partial === true;
   let demandComplete = options.partial !== true;
   let missingTestFlag = false;
@@ -108,6 +123,7 @@ export function aggregateSalesOrders(
       const amount = money?.amount;
       const numericAmount = typeof amount === "number" ? amount : typeof amount === "string" ? Number(amount) : Number.NaN;
       const lineCurrency = money?.currencyCode;
+      let displayAmount: number | null = null;
       if (!Number.isFinite(numericAmount) || typeof lineCurrency !== "string" || !lineCurrency) {
         revenueIncomplete = true;
         partial = true;
@@ -115,8 +131,21 @@ export function aggregateSalesOrders(
         currencyMismatch = true;
         partial = true;
       } else {
-        revenueTotal += numericAmount;
-        day.revenue += numericAmount;
+        displayAmount = numericAmount;
+        if (options.usdRatesByDate !== undefined && options.currencyCode !== "USD" && numericAmount !== 0) {
+          const applicableRate = rateForDate(options.usdRatesByDate, lineCurrency, date);
+          if (applicableRate == null) {
+            displayAmount = null;
+            fxIncomplete = true;
+            partial = true;
+          } else {
+            displayAmount = numericAmount * applicableRate;
+          }
+        }
+        if (displayAmount !== null) {
+          revenueTotal += displayAmount;
+          day.revenue += displayAmount;
+        }
       }
 
       const product = line.product;
@@ -130,7 +159,7 @@ export function aggregateSalesOrders(
           revenue: 0,
         };
         existing.units += units;
-        if (Number.isFinite(numericAmount) && lineCurrency === options.currencyCode) existing.revenue = (existing.revenue ?? 0) + numericAmount;
+        if (displayAmount !== null) existing.revenue = (existing.revenue ?? 0) + displayAmount;
         products.set(product.id, existing);
 
         const variant = line.variant;
@@ -146,7 +175,7 @@ export function aggregateSalesOrders(
             revenue: 0,
           };
           existingVariant.units += units;
-          if (Number.isFinite(numericAmount) && lineCurrency === options.currencyCode) existingVariant.revenue = (existingVariant.revenue ?? 0) + numericAmount;
+          if (displayAmount !== null) existingVariant.revenue = (existingVariant.revenue ?? 0) + displayAmount;
           variants.set(variant.id, existingVariant);
         } else {
           demandComplete = false;
@@ -157,7 +186,7 @@ export function aggregateSalesOrders(
     }
   }
 
-  const revenueAvailable = !currencyMismatch && !revenueIncomplete;
+  const revenueAvailable = !currencyMismatch && !revenueIncomplete && !fxIncomplete;
   const rank = <T extends { units: number; title: string; id: string }>(items: T[]) => items
     .sort((left, right) => right.units - left.units || left.title.localeCompare(right.title) || left.id.localeCompare(right.id))
     .slice(0, 5);
@@ -179,10 +208,11 @@ export function aggregateSalesOrders(
     status: partial ? "partial" : "ready",
     demandComplete,
     ...(currencyMismatch ? { reason: "Revenue is unavailable because Shopify returned mixed shop currencies; order and unit counts remain available without conversion." }
-      : revenueIncomplete ? { reason: "Revenue is unavailable because Shopify returned incomplete line-item price data." }
+      : fxIncomplete ? { reason: "Revenue is unavailable because daily USD reference rates are missing for one or more order dates; order and unit counts remain available." }
+        : revenueIncomplete ? { reason: "Revenue is unavailable because Shopify returned incomplete line-item price data." }
         : missingTestFlag ? { reason: "Some orders lacked Shopify's test-order flag and were excluded from sales totals." }
           : partial ? { reason: "Some Shopify order or line-item pages could not be fully read; displayed totals are partial." } : {}),
-    currencyCode: options.currencyCode || null,
+    currencyCode: convertToUsd ? "USD" : options.currencyCode || null,
     totals: {
       revenue: revenueAvailable ? roundMoney(revenueTotal) : null,
       orders: orderCount,

@@ -22,7 +22,7 @@ export function OverviewDashboard({ data, storeName, error, imports, analytics, 
     <div className="stockhub-route-pending"><s-spinner size="base" accessibilityLabel="Loading store overview" /> Loading overview…</div>
   </div>;
 
-  const currencyCode = samplePreview ? "USD" : analytics.sales.data?.currencyCode ?? analytics.currencyCode;
+  const currencyCode = "USD";
   return <main className={`stockhub-page stockhub-overview${samplePreview ? " stockhub-overview--sample" : ""}`}>
     <OverviewHeader analytics={analytics} range={analytics.range} samplePreview={samplePreview} storeName={storeName} />
     {error ? <s-banner tone="critical">{error}</s-banner> : null}

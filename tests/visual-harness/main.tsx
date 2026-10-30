@@ -125,7 +125,7 @@ function measure() {
       range: overviewParams.get("range") === "7" ? 7 : 30,
       salesCards: [...document.querySelectorAll(".stockhub-overview-sales-metrics .stockhub-overview-metric")].map((element) => {
         const rect = element.getBoundingClientRect();
-        return { label: element.querySelector(".stockhub-metric-label")?.textContent?.trim(), value: element.querySelector(".stockhub-metric-value")?.textContent?.trim(), x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
+        return { label: element.querySelector(".stockhub-metric-label")?.textContent?.trim(), value: element.querySelector(".stockhub-metric-value")?.textContent?.trim(), note: element.querySelector(".stockhub-metric-note")?.textContent?.trim(), x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
       }),
       rangeControls: [...document.querySelectorAll(".stockhub-overview-range a")].map((element) => ({ label: element.textContent?.trim(), href: element.getAttribute("href"), current: element.getAttribute("aria-current") })),
       salesNotices: [...document.querySelectorAll(".stockhub-overview-trend .stockhub-analytics-notice")].map((element) => element.textContent?.trim()),
@@ -135,6 +135,7 @@ function measure() {
       salesNotice: document.querySelector(".stockhub-overview-trend .stockhub-analytics-notice")?.textContent?.trim() ?? "",
       salesEmpty: document.querySelector(".stockhub-overview-trend .stockhub-analytics-empty")?.textContent?.trim() ?? "",
       chartMeasureLabel: document.querySelector(".stockhub-chart-measure-label")?.textContent?.trim() ?? "",
+      chartAxisLabel: document.querySelector(".stockhub-chart-plot")?.getAttribute("aria-label") ?? "",
       chartAxisTicks: [...document.querySelectorAll(".stockhub-chart-y-axis span")].map((element) => element.textContent?.trim()),
       chartLineCount: document.querySelectorAll(".stockhub-chart-line").length,
       chartAreaCount: document.querySelectorAll(".stockhub-chart-area").length,

@@ -14,7 +14,13 @@ export async function validateOverviewLive({ width, metrics, layout, command, ev
   assert.equal(overview.chartLineCount, 1);
   assert.equal(overview.chartAreaCount, 1);
   assert.equal(overview.chartAxisTicks.length, 4, "currency axis has four visible numeric ticks");
-  assert.match(overview.chartMeasureLabel, /USD store currency · no FX conversion/);
+  const revenueCard = overview.salesCards.find(({ label }) => label === "Net merchandise sales");
+  assert.match(revenueCard.value, /^USD\s/);
+  assert.match(revenueCard.note, /USD equivalent · daily reference rates/);
+  assert.match(overview.chartMeasureLabel, /USD equivalent · daily reference rates/);
+  assert.match(overview.chartAxisLabel, /Vertical axis: USD/);
+  assert.ok(overview.chartAxisTicks[0].includes("$"), "live chart ticks use the converted USD amount scale");
+  assert.doesNotMatch(overview.chartAxisTicks[0], /CA\$/, "live chart axis does not retain the old CAD fixture currency");
   assert.deepEqual(overview.salesNotices, []);
   assert.equal(overview.salesRankingCount, 5);
   assert.equal(overview.attentionRows.length, 3);

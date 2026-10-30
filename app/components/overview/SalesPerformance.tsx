@@ -44,7 +44,7 @@ export function SalesPerformance({ analytics, currencyCode, samplePreview }: Pro
   const formatTick = (value: number) => measure === "revenue" && currencyCode
     ? new Intl.NumberFormat("en-US", { style: "currency", currency: currencyCode, notation: "compact", maximumFractionDigits: 1 }).format(value)
     : numberLabel(value);
-  const currencyNote = samplePreview ? "USD sample currency" : currencyCode ? `${currencyCode} store currency · no FX conversion` : "store currency unavailable";
+  const currencyNote = samplePreview ? "USD sample currency" : "USD equivalent · daily reference rates";
   const labelStep = analytics.range === 7 ? 1 : 5;
   const segments: Point[][] = [];
   let segment: Point[] = [];

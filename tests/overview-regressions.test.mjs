@@ -88,7 +88,8 @@ test("sample preview is marked and catalog status cannot be mistaken for an inve
   assert.match(header, /synthetic fixtures/);
   assert.match(header, /stockhub-overview-sample-badge/);
   assert.match(header, /SAMPLE · USD/);
-  assert.match(sales, /store currency · no FX conversion/);
+  assert.doesNotMatch(sales, /store currency · no FX conversion/,
+    "live revenue is normalized to USD rather than displayed in the shop's native currency");
   assert.match(sales, /USD sample currency/);
   assert.match(sales, /stockhub-chart-y-axis/);
   assert.match(sales, /stockhub-chart-line/);
